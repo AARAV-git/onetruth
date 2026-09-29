@@ -36,6 +36,14 @@ WHERE promised_quarter = '2026-Q3'
 # ---------------------------------------------------------------------------
 @st.cache_resource
 def get_connection():
+    # Streamlit Cloud: read from Secrets panel ([connections.snowflake] section)
+    try:
+        secrets = st.secrets.get("connections", {}).get("snowflake", {})
+        if secrets:
+            return snowflake.connector.connect(**dict(secrets))
+    except Exception:
+        pass
+    # Local dev: read from ~/.snowflake/connections.toml
     return snowflake.connector.connect(connection_name=CONNECTION_NAME)
 
 
