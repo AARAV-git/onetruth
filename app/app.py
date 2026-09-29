@@ -36,32 +36,50 @@ WHERE promised_quarter = '2026-Q3'
 # ---------------------------------------------------------------------------
 @st.cache_resource
 def get_connection():
-    # Streamlit Cloud: read from Secrets panel ([connections.snowflake] section)
-    cloud_error = None
+    # Method 1: [connections.snowflake] section in secrets
     try:
         params = dict(st.secrets["connections"]["snowflake"])
         return snowflake.connector.connect(**params)
-    except Exception as e:
-        cloud_error = e
+    except Exception:
+        pass
 
-    # Local dev: read from ~/.snowflake/connections.toml
+    # Method 2: flat secrets (account, user, password at top level)
+    try:
+        params = {
+            k: str(v) for k, v in st.secrets.items()
+            if k in ("account", "user", "password", "warehouse", "database", "role")
+        }
+        if "account" in params and "user" in params:
+            return snowflake.connector.connect(**params)
+    except Exception:
+        pass
+
+    # Method 3: local ~/.snowflake/connections.toml
     try:
         return snowflake.connector.connect(connection_name=CONNECTION_NAME)
-    except Exception as e:
-        if cloud_error:
-            st.error(
-                f"**Streamlit Cloud secrets failed:** {cloud_error}\n\n"
-                f"**Local connections.toml also failed:** {e}\n\n"
-                "Add secrets in Manage app → Settings → Secrets:\n"
-                "```toml\n[connections.snowflake]\n"
-                'account = "SQPCNWB-OR68348"\n'
-                'user = "SUNNYPATHAK979"\n'
-                'password = "..."\n'
-                'warehouse = "ONETRUTH_WH"\n'
-                'database = "ONETRUTH"\n'
-                'role = "ACCOUNTADMIN"\n```'
-            )
-        raise
+    except Exception:
+        pass
+
+    # All methods failed — show debug info
+    try:
+        available = list(st.secrets.keys())
+    except Exception:
+        available = ["(no secrets found)"]
+    st.error(
+        f"**Cannot connect to Snowflake.**\n\n"
+        f"Secrets keys found: `{available}`\n\n"
+        "Paste this in **Manage app → Settings → Secrets**:\n\n"
+        "```toml\n"
+        "[connections.snowflake]\n"
+        'account = "SQPCNWB-OR68348"\n'
+        'user = "sunnypathak979"\n'
+        'password = "your_password"\n'
+        'warehouse = "ONETRUTH_WH"\n'
+        'database = "ONETRUTH"\n'
+        'role = "ACCOUNTADMIN"\n'
+        "```"
+    )
+    st.stop()
 
 
 def use_role(conn, role_name):
