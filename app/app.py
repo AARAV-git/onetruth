@@ -37,13 +37,31 @@ WHERE promised_quarter = '2026-Q3'
 @st.cache_resource
 def get_connection():
     # Streamlit Cloud: read from Secrets panel ([connections.snowflake] section)
+    cloud_error = None
     try:
         params = dict(st.secrets["connections"]["snowflake"])
         return snowflake.connector.connect(**params)
-    except (KeyError, FileNotFoundError):
-        pass
+    except Exception as e:
+        cloud_error = e
+
     # Local dev: read from ~/.snowflake/connections.toml
-    return snowflake.connector.connect(connection_name=CONNECTION_NAME)
+    try:
+        return snowflake.connector.connect(connection_name=CONNECTION_NAME)
+    except Exception as e:
+        if cloud_error:
+            st.error(
+                f"**Streamlit Cloud secrets failed:** {cloud_error}\n\n"
+                f"**Local connections.toml also failed:** {e}\n\n"
+                "Add secrets in Manage app → Settings → Secrets:\n"
+                "```toml\n[connections.snowflake]\n"
+                'account = "SQPCNWB-OR68348"\n'
+                'user = "SUNNYPATHAK979"\n'
+                'password = "..."\n'
+                'warehouse = "ONETRUTH_WH"\n'
+                'database = "ONETRUTH"\n'
+                'role = "ACCOUNTADMIN"\n```'
+            )
+        raise
 
 
 def use_role(conn, role_name):
