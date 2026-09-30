@@ -502,7 +502,11 @@ st.markdown(f"""
         display: inline-block;
         box-shadow: 0 3px 12px rgba(14,165,233,0.3);
     }}
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] p {{
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] p,
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] span,
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] li,
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] strong,
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) * {{
         color: white !important;
     }}
     /* Assistant bubble */
