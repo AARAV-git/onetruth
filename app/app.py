@@ -489,40 +489,20 @@ st.markdown(f"""
     /* ---- Chat messages ---- */
     div[data-testid="stChatMessage"] {{
         border: none;
-        padding: 8px 0;
-        margin-bottom: 4px;
+        padding: 12px 8px;
+        margin-bottom: 2px;
         background: transparent !important;
+        border-bottom: 1px solid rgba(148,163,184,0.2);
     }}
-    /* User bubble */
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] {{
-        background: linear-gradient(135deg, {BRAND} 0%, {BRAND_DARK} 100%);
-        color: white !important;
-        border-radius: 20px 20px 6px 20px;
-        padding: 12px 18px;
-        display: inline-block;
-        box-shadow: 0 3px 12px rgba(14,165,233,0.3);
-    }}
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] p,
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] span,
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] li,
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] strong,
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) * {{
-        color: white !important;
-    }}
-    /* Assistant bubble */
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] {{
-        background: {BG_CARD};
-        border: 1.5px solid {BORDER};
-        border-radius: 20px 20px 20px 6px;
-        padding: 12px 18px;
-        display: inline-block;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    }}
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] p {{
-        color: {SLATE} !important;
-    }}
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] strong {{
+    /* All chat text uses dark color for readability */
+    div[data-testid="stChatMessage"] p,
+    div[data-testid="stChatMessage"] span,
+    div[data-testid="stChatMessage"] li,
+    div[data-testid="stChatMessage"] strong {{
         color: {NAVY} !important;
+    }}
+    div[data-testid="stChatMessage"] strong {{
+        font-weight: 700 !important;
     }}
 
     /* ---- Chat input bar ---- */
