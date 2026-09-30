@@ -3,6 +3,7 @@
 import os
 import re
 import json
+import uuid
 import streamlit as st
 import requests
 import pandas as pd
@@ -10,6 +11,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import snowflake.connector
 from snowflake.connector.errors import ProgrammingError, DatabaseError
+from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # Config
@@ -40,14 +42,12 @@ WHERE promised_quarter = '2026-Q3'
 def get_connection():
     extra = {"client_session_keep_alive": True}
 
-    # Method 1: [connections.snowflake] section in secrets
     try:
         params = {**dict(st.secrets["connections"]["snowflake"]), **extra}
         return snowflake.connector.connect(**params)
     except Exception:
         pass
 
-    # Method 2: flat secrets (account, user, password at top level)
     try:
         params = {
             k: str(v) for k, v in st.secrets.items()
@@ -58,7 +58,6 @@ def get_connection():
     except Exception:
         pass
 
-    # Method 3: local ~/.snowflake/connections.toml
     try:
         return snowflake.connector.connect(
             connection_name=CONNECTION_NAME, **extra
@@ -66,7 +65,6 @@ def get_connection():
     except Exception:
         pass
 
-    # All methods failed — show debug info
     try:
         available = list(st.secrets.keys())
     except Exception:
@@ -123,6 +121,14 @@ def run_query(conn, sql):
         cur.close()
         return pd.DataFrame(rows, columns=cols)
     return _with_reconnect(_do)
+
+
+def run_dml(conn, sql, params=None):
+    def _do(c):
+        cur = c.cursor()
+        cur.execute(sql, params or [])
+        cur.close()
+    _with_reconnect(_do)
 
 # ---------------------------------------------------------------------------
 # Metric metadata (cached once)
@@ -204,6 +210,88 @@ def find_metric_in_sql(sql_text, metrics_meta):
     return found
 
 # ---------------------------------------------------------------------------
+# Chat session persistence (Snowflake-backed)
+# ---------------------------------------------------------------------------
+def _serializable_history(chat_history):
+    out = []
+    for turn in chat_history:
+        t = {k: v for k, v in turn.items() if k != "df"}
+        if turn.get("df") is not None:
+            t["df_json"] = turn["df"].to_json(orient="split")
+        out.append(t)
+    return out
+
+
+def _deserialize_history(raw):
+    out = []
+    for turn in raw:
+        t = dict(turn)
+        if "df_json" in t and t["df_json"]:
+            t["df"] = pd.read_json(t["df_json"], orient="split")
+            del t["df_json"]
+        else:
+            t["df"] = None
+        out.append(t)
+    return out
+
+
+def save_session(conn, session_id, user_name, title, chat_history, is_shared=False):
+    use_role(conn, "ACCOUNTADMIN")
+    payload = json.dumps(_serializable_history(chat_history))
+    sql = """
+    MERGE INTO ONETRUTH.APP.CHAT_SESSIONS t
+    USING (SELECT %s AS sid, %s AS uname, %s AS ttl, PARSE_JSON(%s) AS msgs,
+                  %s AS shared) s
+    ON t.SESSION_ID = s.sid
+    WHEN MATCHED THEN UPDATE SET
+        TITLE = s.ttl, MESSAGES = s.msgs, UPDATED_AT = CURRENT_TIMESTAMP(),
+        IS_SHARED = s.shared
+    WHEN NOT MATCHED THEN INSERT (SESSION_ID, USER_NAME, TITLE, MESSAGES, IS_SHARED)
+        VALUES (s.sid, s.uname, s.ttl, s.msgs, s.shared)
+    """
+    run_dml(conn, sql, [session_id, user_name, title, payload, is_shared])
+
+
+def load_session(conn, session_id):
+    use_role(conn, "ACCOUNTADMIN")
+    df = run_query(conn, f"""
+        SELECT SESSION_ID, USER_NAME, TITLE, MESSAGES, IS_SHARED
+        FROM ONETRUTH.APP.CHAT_SESSIONS
+        WHERE SESSION_ID = '{session_id}'
+    """)
+    if df.empty:
+        return None
+    row = df.iloc[0]
+    msgs_raw = row["MESSAGES"]
+    if isinstance(msgs_raw, str):
+        msgs_raw = json.loads(msgs_raw)
+    return {
+        "session_id": row["SESSION_ID"],
+        "user_name": row["USER_NAME"],
+        "title": row["TITLE"],
+        "messages": _deserialize_history(msgs_raw),
+        "is_shared": row["IS_SHARED"],
+    }
+
+
+def list_sessions(conn, user_name):
+    use_role(conn, "ACCOUNTADMIN")
+    df = run_query(conn, f"""
+        SELECT SESSION_ID, TITLE, UPDATED_AT
+        FROM ONETRUTH.APP.CHAT_SESSIONS
+        WHERE USER_NAME = '{user_name}'
+        ORDER BY UPDATED_AT DESC
+        LIMIT 30
+    """)
+    return df
+
+
+def delete_session(conn, session_id):
+    use_role(conn, "ACCOUNTADMIN")
+    run_dml(conn, f"DELETE FROM ONETRUTH.APP.CHAT_SESSIONS WHERE SESSION_ID = '{session_id}'")
+
+
+# ---------------------------------------------------------------------------
 # Auto-chart: detect shape and render the best visualization
 # ---------------------------------------------------------------------------
 TIME_PATTERNS = re.compile(
@@ -217,7 +305,6 @@ def auto_visualize(result_df, container):
 
     nrows, ncols = result_df.shape
 
-    # Single scalar
     if nrows == 1 and ncols == 1:
         val = result_df.iloc[0, 0]
         col_name = result_df.columns[0]
@@ -230,7 +317,6 @@ def auto_visualize(result_df, container):
             )
         return
 
-    # Single row, multiple columns — metric cards
     if nrows == 1:
         cols = container.columns(min(ncols, 4))
         for i, c in enumerate(result_df.columns):
@@ -245,12 +331,10 @@ def auto_visualize(result_df, container):
                     st.metric(label, str(val))
         return
 
-    # Multi-row: identify text/time and numeric columns
     str_cols = [c for c in result_df.columns if result_df[c].dtype == "object"]
     num_cols = [c for c in result_df.columns if pd.api.types.is_numeric_dtype(result_df[c])]
     time_cols = [c for c in str_cols if TIME_PATTERNS.search(c)]
 
-    # Time-series line chart
     if time_cols and num_cols:
         x_col = time_cols[0]
         df_sorted = result_df.sort_values(x_col)
@@ -265,7 +349,6 @@ def auto_visualize(result_df, container):
             st.dataframe(df_sorted, use_container_width=True)
         return
 
-    # Categorical bar chart
     if str_cols and num_cols and nrows <= 50:
         x_col = str_cols[0]
         fig = px.bar(
@@ -280,18 +363,17 @@ def auto_visualize(result_df, container):
             st.dataframe(result_df, use_container_width=True)
         return
 
-    # Fallback: plain table
     container.dataframe(result_df, use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # Theme colors
 # ---------------------------------------------------------------------------
-BRAND = "#29B5E8"       # Snowflake blue
-ACCENT = "#0D9373"      # teal green — success / governed
-WARN   = "#FF6F61"      # coral — alerts / masked
-PURPLE = "#7C3AED"      # violet — Cortex Analyst
-GOLD   = "#F59E0B"      # amber — highlights
-NAVY   = "#0F172A"      # dark navy — text accents
+BRAND = "#29B5E8"
+ACCENT = "#0D9373"
+WARN   = "#FF6F61"
+PURPLE = "#7C3AED"
+GOLD   = "#F59E0B"
+NAVY   = "#0F172A"
 CHART_PALETTE = [BRAND, ACCENT, PURPLE, GOLD, WARN, "#38BDF8"]
 
 # ---------------------------------------------------------------------------
@@ -305,7 +387,6 @@ st.set_page_config(
 
 st.markdown(f"""
 <style>
-    /* ---- Sidebar ---- */
     section[data-testid="stSidebar"] {{
         background: linear-gradient(180deg, {NAVY} 0%, #1E293B 100%);
     }}
@@ -315,8 +396,6 @@ st.markdown(f"""
     section[data-testid="stSidebar"] hr {{
         border-color: rgba(255,255,255,0.12);
     }}
-
-    /* ---- Metric cards ---- */
     div[data-testid="stMetric"] {{
         background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
         border: 1px solid #DBEAFE;
@@ -337,8 +416,6 @@ st.markdown(f"""
         font-size: 1.8rem;
         font-weight: 700;
     }}
-
-    /* ---- Tabs ---- */
     button[data-baseweb="tab"] {{
         font-weight: 600;
         font-size: 0.95rem;
@@ -347,30 +424,58 @@ st.markdown(f"""
         color: {BRAND} !important;
         border-bottom-color: {BRAND} !important;
     }}
-
-    /* ---- Chat messages ---- */
     div[data-testid="stChatMessage"] {{
         border-radius: 12px;
         border: 1px solid #E2E8F0;
         margin-bottom: 8px;
     }}
-
-    /* ---- Success / error badges ---- */
     div[data-testid="stAlert"] {{
         border-radius: 10px;
     }}
-
-    /* ---- Expander ---- */
     details {{
         border: 1px solid #E2E8F0 !important;
         border-radius: 10px !important;
     }}
-
-    /* ---- Hide default Streamlit footer ---- */
     footer {{visibility: hidden;}}
 </style>
 """, unsafe_allow_html=True)
 
+# ---------------------------------------------------------------------------
+# Initialize connection
+# ---------------------------------------------------------------------------
+conn = get_connection()
+metrics_meta = load_metric_metadata()
+
+# ---------------------------------------------------------------------------
+# Session state defaults
+# ---------------------------------------------------------------------------
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "active_session_id" not in st.session_state:
+    st.session_state.active_session_id = str(uuid.uuid4())
+if "session_title" not in st.session_state:
+    st.session_state.session_title = "New Chat"
+if "readonly_mode" not in st.session_state:
+    st.session_state.readonly_mode = False
+if "shared_owner" not in st.session_state:
+    st.session_state.shared_owner = None
+
+# Check for shared session in URL params
+qp = st.query_params
+shared_sid = qp.get("session", None)
+if shared_sid and shared_sid != st.session_state.get("_loaded_shared_sid"):
+    data = load_session(conn, shared_sid)
+    if data and data["is_shared"]:
+        st.session_state.chat_history = data["messages"]
+        st.session_state.active_session_id = data["session_id"]
+        st.session_state.session_title = data["title"]
+        st.session_state.readonly_mode = True
+        st.session_state.shared_owner = data["user_name"]
+        st.session_state._loaded_shared_sid = shared_sid
+
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
 with st.sidebar:
     st.markdown(
         f'<h1 style="margin-bottom:0; font-size:1.8rem;">OneTruth</h1>'
@@ -379,12 +484,62 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.divider()
-    try:
-        conn = get_connection()
-        st.success("Connected to Snowflake")
-    except Exception:
-        conn = None
-        st.error("Disconnected")
+
+    # User identity
+    user_name = st.text_input("Your name", value="", placeholder="Enter your name")
+    if user_name:
+        st.session_state["user_name"] = user_name
+    else:
+        user_name = st.session_state.get("user_name", "")
+
+    if user_name:
+        st.divider()
+
+        # New chat button
+        if st.button("+ New Chat", use_container_width=True, type="primary"):
+            st.session_state.chat_history = []
+            st.session_state.active_session_id = str(uuid.uuid4())
+            st.session_state.session_title = "New Chat"
+            st.session_state.readonly_mode = False
+            st.session_state.shared_owner = None
+            st.query_params.clear()
+            st.rerun()
+
+        # Past sessions
+        st.markdown("**Chat History**")
+        try:
+            df_sessions = list_sessions(conn, user_name)
+            if not df_sessions.empty:
+                for _, srow in df_sessions.iterrows():
+                    sid = srow["SESSION_ID"]
+                    title = srow["TITLE"] or "Untitled"
+                    is_active = sid == st.session_state.active_session_id
+                    col_btn, col_del = st.columns([5, 1])
+                    with col_btn:
+                        label = f"{'> ' if is_active else ''}{title}"
+                        if st.button(label, key=f"load_{sid}", use_container_width=True):
+                            data = load_session(conn, sid)
+                            if data:
+                                st.session_state.chat_history = data["messages"]
+                                st.session_state.active_session_id = sid
+                                st.session_state.session_title = data["title"]
+                                st.session_state.readonly_mode = False
+                                st.session_state.shared_owner = None
+                                st.query_params.clear()
+                                st.rerun()
+                    with col_del:
+                        if st.button("X", key=f"del_{sid}"):
+                            delete_session(conn, sid)
+                            if sid == st.session_state.active_session_id:
+                                st.session_state.chat_history = []
+                                st.session_state.active_session_id = str(uuid.uuid4())
+                                st.session_state.session_title = "New Chat"
+                            st.rerun()
+            else:
+                st.caption("No saved chats yet.")
+        except Exception:
+            st.caption("No saved chats yet.")
+
     st.divider()
     st.markdown(
         f"**Governed Metrics**\n\n"
@@ -395,9 +550,6 @@ with st.sidebar:
     )
     st.divider()
     st.caption("Built with Snowflake + Cortex Analyst")
-
-conn = get_connection()
-metrics_meta = load_metric_metadata()
 
 # ---------------------------------------------------------------------------
 # Tabs
@@ -411,7 +563,6 @@ with tab_dash:
     st.subheader("Executive KPI Dashboard — Q3 2026")
     use_role(conn, "ACCOUNTADMIN")
 
-    # 4 metric cards
     kpi_query = """
     SELECT * FROM SEMANTIC_VIEW(
         ONETRUTH.SEMANTIC.SUPPLY_CHAIN_SV
@@ -435,7 +586,6 @@ with tab_dash:
             c2.metric("Fill Rate", f"{fill * 100:.1f}%" if fill else "N/A")
             c3.metric("Landed Cost/Unit", f"${landed:,.2f}" if landed else "N/A")
 
-            # Days of inventory — separate query (non-additive by snapshot_date)
             doi_query = """
             SELECT * FROM SEMANTIC_VIEW(
                 ONETRUTH.SEMANTIC.SUPPLY_CHAIN_SV
@@ -455,7 +605,6 @@ with tab_dash:
 
     st.divider()
 
-    # Monthly OTD + Fill Rate trend
     trend_query = """
     SELECT * FROM SEMANTIC_VIEW(
         ONETRUTH.SEMANTIC.SUPPLY_CHAIN_SV
@@ -517,22 +666,48 @@ with tab_dash:
     except Exception as e:
         st.warning(f"Could not load trend: {e}")
 
-# ── Tab 2: Ask (multi-turn chat) ─────────────────────────────────────────
+# ── Tab 2: Ask (multi-turn chat with persistence) ────────────────────────
 with tab_ask:
-    col_persona, col_spacer = st.columns([1, 3])
-    with col_persona:
-        persona = st.selectbox("Persona", list(ROLES.keys()))
-    role_name = ROLES[persona]
-    use_role(conn, role_name)
-    st.caption(f"Active role: `{role_name}`")
+    # Shared-session banner
+    if st.session_state.readonly_mode:
+        st.info(
+            f"Viewing shared conversation by **{st.session_state.shared_owner}**. "
+            "This is read-only."
+        )
+    else:
+        col_persona, col_spacer = st.columns([1, 3])
+        with col_persona:
+            persona = st.selectbox("Persona", list(ROLES.keys()))
+        role_name = ROLES[persona]
+        use_role(conn, role_name)
+        st.caption(f"Active role: `{role_name}`")
 
-    # Session state for chat history
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
-    if st.button("Clear chat", type="secondary"):
-        st.session_state.chat_history = []
-        st.rerun()
+    # Share button row
+    if not st.session_state.readonly_mode and st.session_state.chat_history:
+        user_name = st.session_state.get("user_name", "")
+        col_share, col_clear = st.columns(2)
+        with col_share:
+            if st.button("Share this chat"):
+                if user_name:
+                    save_session(
+                        conn,
+                        st.session_state.active_session_id,
+                        user_name,
+                        st.session_state.session_title,
+                        st.session_state.chat_history,
+                        is_shared=True,
+                    )
+                    share_url = f"?session={st.session_state.active_session_id}"
+                    st.success(f"Shared! Send this link: `{share_url}`")
+                else:
+                    st.warning("Enter your name in the sidebar first.")
+        with col_clear:
+            if st.button("Clear chat"):
+                st.session_state.chat_history = []
+                st.session_state.active_session_id = str(uuid.uuid4())
+                st.session_state.session_title = "New Chat"
+                st.query_params.clear()
+                st.rerun()
 
     # Render previous messages
     for turn in st.session_state.chat_history:
@@ -552,11 +727,13 @@ with tab_ask:
                                 st.markdown(f"**{name}**: {meta['comment']}")
                         st.caption(f"Period: {extract_period(turn['sql'])}")
 
-    # Chat input
-    question = st.chat_input("Ask about the supply chain...")
+    # Chat input (hidden in read-only mode)
+    if not st.session_state.readonly_mode:
+        question = st.chat_input("Ask about the supply chain...")
+    else:
+        question = None
 
     if question:
-        # Add user message
         st.session_state.chat_history.append({
             "role": "user",
             "display": question,
@@ -564,6 +741,10 @@ with tab_ask:
         })
         with st.chat_message("user"):
             st.markdown(question)
+
+        # Auto-title from first question
+        if st.session_state.session_title == "New Chat":
+            st.session_state.session_title = question[:60] + ("..." if len(question) > 60 else "")
 
         # Local answers for non-data questions
         q_lower = question.lower()
@@ -601,7 +782,6 @@ with tab_ask:
                 "df": None,
             })
         else:
-            # Build multi-turn message list for Cortex Analyst
             analyst_messages = []
             for turn in st.session_state.chat_history:
                 if turn["role"] == "user":
@@ -624,7 +804,6 @@ with tab_ask:
                         text, sql_stmt, suggestions = f"Analyst call failed: {e}", None, []
 
                 result_df = None
-                display_parts = []
 
                 if text:
                     is_refusal = any(
@@ -633,10 +812,8 @@ with tab_ask:
                     )
                     if is_refusal:
                         st.warning(text)
-                        display_parts.append(text)
                     elif not sql_stmt:
                         st.info(text)
-                        display_parts.append(text)
 
                 if sql_stmt:
                     try:
@@ -658,7 +835,6 @@ with tab_ask:
                     for s in suggestions:
                         st.write(f"- {s}")
 
-                # Build the response content for Analyst multi-turn
                 response_content = []
                 if text:
                     response_content.append({"type": "text", "text": text})
@@ -674,6 +850,17 @@ with tab_ask:
                     "sql": sql_stmt,
                     "df": result_df,
                 })
+
+        # Auto-save after every exchange
+        user_name = st.session_state.get("user_name", "")
+        if user_name:
+            save_session(
+                conn,
+                st.session_state.active_session_id,
+                user_name,
+                st.session_state.session_title,
+                st.session_state.chat_history,
+            )
 
 # ── Tab 3: Before OneTruth ───────────────────────────────────────────────
 with tab_before:
@@ -793,7 +980,6 @@ with tab_masking:
 
     st.divider()
 
-    # Raw column comparison
     st.markdown("**Raw cost column visibility by role**")
     raw_cost_query = """
     SELECT
