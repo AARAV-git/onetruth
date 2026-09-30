@@ -378,7 +378,7 @@ NAVY       = "#0F172A"      # Slate 900 — text/headings
 SLATE      = "#334155"      # Slate 700 — secondary text
 MUTED      = "#94A3B8"      # Slate 400 — captions
 BG_MAIN    = "#F1F5F9"      # Slate 100 — page background
-BG_CARD    = "#F8FAFC"       # Slate 50 — card background (softer than pure white)
+BG_CARD    = "#EFF3F8"       # Muted off-white — easy on the eyes
 BORDER     = "#E2E8F0"      # Slate 200 — borders
 CHART_PALETTE = [BRAND, ACCENT, PURPLE, GOLD, WARN, "#38BDF8"]
 
