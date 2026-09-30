@@ -257,6 +257,7 @@ def auto_visualize(result_df, container):
         fig = px.line(
             df_sorted, x=x_col, y=num_cols,
             markers=True, template="plotly_white",
+            color_discrete_sequence=CHART_PALETTE,
         )
         fig.update_layout(height=420, xaxis_title=None)
         container.plotly_chart(fig, use_container_width=True)
@@ -271,6 +272,7 @@ def auto_visualize(result_df, container):
             result_df, x=x_col, y=num_cols,
             barmode="group", template="plotly_white",
             text_auto=".2s",
+            color_discrete_sequence=CHART_PALETTE,
         )
         fig.update_layout(height=420, xaxis_title=None)
         container.plotly_chart(fig, use_container_width=True)
@@ -282,13 +284,100 @@ def auto_visualize(result_df, container):
     container.dataframe(result_df, use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# Page config & sidebar
+# Theme colors
 # ---------------------------------------------------------------------------
-st.set_page_config(page_title="OneTruth Supply Chain", layout="wide")
+BRAND = "#29B5E8"       # Snowflake blue
+ACCENT = "#0D9373"      # teal green — success / governed
+WARN   = "#FF6F61"      # coral — alerts / masked
+PURPLE = "#7C3AED"      # violet — Cortex Analyst
+GOLD   = "#F59E0B"      # amber — highlights
+NAVY   = "#0F172A"      # dark navy — text accents
+CHART_PALETTE = [BRAND, ACCENT, PURPLE, GOLD, WARN, "#38BDF8"]
+
+# ---------------------------------------------------------------------------
+# Page config & custom CSS
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="OneTruth Supply Chain",
+    page_icon="https://www.snowflake.com/favicon.ico",
+    layout="wide",
+)
+
+st.markdown(f"""
+<style>
+    /* ---- Sidebar ---- */
+    section[data-testid="stSidebar"] {{
+        background: linear-gradient(180deg, {NAVY} 0%, #1E293B 100%);
+    }}
+    section[data-testid="stSidebar"] * {{
+        color: #E2E8F0 !important;
+    }}
+    section[data-testid="stSidebar"] hr {{
+        border-color: rgba(255,255,255,0.12);
+    }}
+
+    /* ---- Metric cards ---- */
+    div[data-testid="stMetric"] {{
+        background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
+        border: 1px solid #DBEAFE;
+        border-left: 4px solid {BRAND};
+        border-radius: 12px;
+        padding: 16px 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }}
+    div[data-testid="stMetric"] label {{
+        color: #64748B !important;
+        font-weight: 600;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }}
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
+        color: {NAVY} !important;
+        font-size: 1.8rem;
+        font-weight: 700;
+    }}
+
+    /* ---- Tabs ---- */
+    button[data-baseweb="tab"] {{
+        font-weight: 600;
+        font-size: 0.95rem;
+    }}
+    button[data-baseweb="tab"][aria-selected="true"] {{
+        color: {BRAND} !important;
+        border-bottom-color: {BRAND} !important;
+    }}
+
+    /* ---- Chat messages ---- */
+    div[data-testid="stChatMessage"] {{
+        border-radius: 12px;
+        border: 1px solid #E2E8F0;
+        margin-bottom: 8px;
+    }}
+
+    /* ---- Success / error badges ---- */
+    div[data-testid="stAlert"] {{
+        border-radius: 10px;
+    }}
+
+    /* ---- Expander ---- */
+    details {{
+        border: 1px solid #E2E8F0 !important;
+        border-radius: 10px !important;
+    }}
+
+    /* ---- Hide default Streamlit footer ---- */
+    footer {{visibility: hidden;}}
+</style>
+""", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.title("OneTruth")
-    st.caption("Governed Supply Chain Analytics")
+    st.markdown(
+        f'<h1 style="margin-bottom:0; font-size:1.8rem;">OneTruth</h1>'
+        f'<p style="color:{BRAND} !important; margin-top:0; font-size:0.9rem;">'
+        f'Governed Supply Chain Analytics</p>',
+        unsafe_allow_html=True,
+    )
     st.divider()
     try:
         conn = get_connection()
@@ -298,12 +387,14 @@ with st.sidebar:
         st.error("Disconnected")
     st.divider()
     st.markdown(
-        "**Governed Metrics**\n"
-        "- ON_TIME_DELIVERY_RATE\n"
-        "- FILL_RATE\n"
-        "- DAYS_OF_INVENTORY\n"
-        "- LANDED_COST_PER_UNIT"
+        f"**Governed Metrics**\n\n"
+        f"- `ON_TIME_DELIVERY_RATE`\n"
+        f"- `FILL_RATE`\n"
+        f"- `DAYS_OF_INVENTORY`\n"
+        f"- `LANDED_COST_PER_UNIT`"
     )
+    st.divider()
+    st.caption("Built with Snowflake + Cortex Analyst")
 
 conn = get_connection()
 metrics_meta = load_metric_metadata()
@@ -389,6 +480,7 @@ with tab_dash:
                     df_plot, x="PROMISED_MONTH", y="Rate", color="Metric",
                     markers=True, template="plotly_white",
                     labels={"PROMISED_MONTH": "Month", "Rate": "%"},
+                    color_discrete_sequence=[BRAND, ACCENT],
                 )
                 fig_trend.update_layout(height=350, legend=dict(orientation="h", y=-0.2))
                 st.plotly_chart(fig_trend, use_container_width=True)
@@ -413,7 +505,7 @@ with tab_dash:
                             x="OTD %", y="CUSTOMER_NAME",
                             orientation="h", template="plotly_white",
                             color="OTD %",
-                            color_continuous_scale=["#EF553B", "#FFA15A", "#00CC96"],
+                            color_continuous_scale=[WARN, GOLD, ACCENT],
                         )
                         fig_cust.update_layout(
                             height=350, yaxis_title=None, showlegend=False,
@@ -562,7 +654,7 @@ with tab_before:
             float(df_persona.iloc[0]["PROCUREMENT_OTD_OTIF"]),
             float(df_persona.iloc[0]["GOVERNED_OTD"]),
         ]
-        colors = ["#636EFA", "#EF553B", "#FFA15A", "#00CC96"]
+        colors = [BRAND, WARN, GOLD, ACCENT]
         fig = go.Figure(
             go.Bar(
                 x=labels,
