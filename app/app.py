@@ -569,15 +569,25 @@ with tab_ask:
         q_lower = question.lower()
         about_keywords = ["who built", "who made", "who created", "who developed",
                           "who designed", "built this", "made this", "your team",
-                          "your creator", "about you", "who are you"]
+                          "your creator", "about you", "who are you", "team member",
+                          "team lead", "main developer", "main in", "neuroforge",
+                          "sunny pathak", "saurav sharma", "himanshi sharma",
+                          "behind this", "developed by", "created by", "made by",
+                          "built by", "building you", "build you", "your developer",
+                          "your builder", "who is behind", "who works on"]
         is_about = any(kw in q_lower for kw in about_keywords)
 
         if is_about:
             team_text = (
                 "This app was built by **Team NeuroForge**.\n\n"
-                "- **Team Leader:** Sunny Pathak\n"
-                "- **Member:** Saurav Sharma\n"
-                "- **Member:** Himanshi Sharma\n\n"
+                "| Role | Name |\n"
+                "|:-----|:-----|\n"
+                "| **Team Leader & Architect** | Sunny Pathak |\n"
+                "| **Member** | Saurav Sharma |\n"
+                "| **Member** | Himanshi Sharma |\n\n"
+                "**Sunny Pathak** leads the team and is the primary architect behind "
+                "OneTruth — from the semantic view design and RBAC model to the "
+                "Cortex Analyst integration and this Streamlit app.\n\n"
                 "OneTruth demonstrates governed supply chain analytics "
                 "powered by Snowflake Semantic Views and Cortex Analyst."
             )
