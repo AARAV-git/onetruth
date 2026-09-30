@@ -27,21 +27,186 @@
 - Column-level masking that's **visually provable** in the app
 - Persistent chat sessions stored in Snowflake — ChatGPT-style UX
 - Downloadable CSV + PDF reports on every query result
+- Entire app built using **Snowflake CoCo CLI** — from SQL generation to Streamlit deployment
 
 ---
 
-## The Problem
+## 1. Problem Brief
 
-> *"What's our on-time delivery rate?"*
+### What real business problem does this solve?
 
-| Team | Their OTD | How they measure it |
-|:-----|:---------:|:--------------------|
-| **Planning** | 91.6% | ERP dispatch confirmation vs promised date |
-| **Logistics** | 82.8% | Gate-in timestamp vs promised date |
-| **Procurement** | 62.9% | Order-level: every line on-time AND in-full |
-| **OneTruth** | **78.4%** | **Customer receipt vs promised date** |
+In supply chain organizations, **metric inconsistency** is the #1 cause of misaligned decisions. When the VP of Planning says OTD is 91.6% and the VP of Logistics says it's 82.8%, leadership loses trust in the data — and makes decisions based on whichever number supports their narrative.
 
-The first three are all "correct" by their own definition — but they're answering different questions. OneTruth enforces a single governed definition through a Snowflake Semantic View, and Cortex Analyst ensures every user — regardless of role — gets the same answer.
+This isn't a data quality problem. It's a **governance problem**: each team defines "on-time delivery" differently, queries different source columns, and applies different filters. All three numbers are technically correct — they're just answering different questions.
+
+### Who is the target user/persona?
+
+| Persona | Role | What they need |
+|:--------|:-----|:---------------|
+| **Supply Chain VP** | Executive | Single trusted KPI dashboard, downloadable reports |
+| **Planning Analyst** | `PLANNING_ROLE` | Natural language access to governed metrics, full cost visibility |
+| **Procurement Manager** | `PROCUREMENT_ROLE` | Supplier performance metrics, cost analysis |
+| **Logistics Coordinator** | `LOGISTICS_ROLE` | Delivery performance without cost data exposure |
+| **Data Governance Lead** | `ACCOUNTADMIN` | Proof that RBAC, masking, and AI guardrails work |
+
+### What is the current pain point?
+
+| Before OneTruth | After OneTruth |
+|:----------------|:---------------|
+| 3 teams, 3 different OTD numbers | 1 governed metric, identical across all roles |
+| Each team writes ad-hoc SQL with different definitions | Cortex Analyst generates SQL from the semantic view — no drift |
+| No way to prove masking works | Masking tab shows NULL vs real values side-by-side |
+| Metrics defined in spreadsheets or tribal knowledge | 4 metrics codified in a semantic view with AI guardrails |
+| Executives don't trust the numbers | Consistency tab proves all roles return 78.4% |
+
+### Industry/domain context
+
+**Manufacturing & Discrete Supply Chain** — the domain where OTD, fill rate, inventory days, and landed cost are the four KPIs that drive every operational review. OneTruth is built for this domain but the pattern (semantic view + AI guardrails + RBAC + masking) applies to any industry where metric governance matters: healthcare (readmission rates), finance (risk metrics), retail (conversion rates).
+
+---
+
+## 2. Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        USER LAYER                                        │
+│                                                                          │
+│   Planning Analyst    Procurement Mgr    Logistics Coord    VP / Exec    │
+│   (PLANNING_ROLE)     (PROCUREMENT_ROLE) (LOGISTICS_ROLE)   (ACCOUNTADMIN)│
+└──────────┬──────────────────┬──────────────────┬──────────────┬──────────┘
+           │                  │                  │              │
+           ▼                  ▼                  ▼              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     STREAMLIT APP (6 tabs)                                │
+│                                                                          │
+│  ┌───────────┐ ┌─────────┐ ┌────────────┐ ┌───────────┐ ┌───────────┐  │
+│  │ Dashboard │ │  Ask    │ │ Before     │ │Consistency│ │  Masking  │  │
+│  │ (KPIs +   │ │(ChatGPT │ │ OneTruth   │ │(3 roles,  │ │(NULL vs   │  │
+│  │  trends)  │ │ style)  │ │ (chaos)    │ │ 1 number) │ │  $value)  │  │
+│  └─────┬─────┘ └────┬────┘ └─────┬──────┘ └─────┬─────┘ └─────┬─────┘  │
+│        │            │            │              │              │         │
+│  ┌─────┴────────────┴────────────┴──────────────┴──────────────┘         │
+│  │  Auto-Chart Engine │ Download CSV+PDF │ Session Persistence           │
+│  └──────────┬─────────┘                                                  │
+└─────────────┼────────────────────────────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     SNOWFLAKE PLATFORM                                    │
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │              Cortex Analyst REST API                              │    │
+│  │  Receives natural language → generates governed SQL               │    │
+│  │  Multi-turn conversation history for follow-up questions          │    │
+│  └──────────────────────┬───────────────────────────────────────────┘    │
+│                         ▼                                                │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │           SUPPLY_CHAIN_SV (Semantic View)                        │    │
+│  │                                                                  │    │
+│  │  4 Governed Metrics:                                             │    │
+│  │    ON_TIME_DELIVERY_RATE · FILL_RATE                             │    │
+│  │    DAYS_OF_INVENTORY · LANDED_COST_PER_UNIT                      │    │
+│  │                                                                  │    │
+│  │  33 Dimensions · 6 Relationships · 12 Facts                      │    │
+│  │                                                                  │    │
+│  │  AI Guardrails:                                                  │    │
+│  │    AI_SQL_GENERATION — constrains to governed metrics only        │    │
+│  │    AI_QUESTION_CATEGORIZATION — rejects undefined KPIs (OTIF)     │    │
+│  └──────────────────────┬───────────────────────────────────────────┘    │
+│                         ▼                                                │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │                  STRUCTURED DATA SOURCES                         │    │
+│  │                                                                  │    │
+│  │  ORDER_LINES_V ──┐                                               │    │
+│  │  (ERP orders +   │   PARTS · PLANTS · CUSTOMERS                  │    │
+│  │   logistics      │   SUPPLIERS_V (bridged via SUPPLIER_XREF)     │    │
+│  │   shipments)     │   INVENTORY_SNAPSHOT                          │    │
+│  │                  │                                               │    │
+│  │  ← Joined from: ORDERS_ERP + SHIPMENTS_LOGISTICS                │    │
+│  │     (two source systems reconciled into one view)                │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │                  SECURITY & GOVERNANCE LAYER                     │    │
+│  │                                                                  │    │
+│  │  RBAC: PLANNING_ROLE │ PROCUREMENT_ROLE │ LOGISTICS_ROLE         │    │
+│  │  Masking: MASK_COST_FROM_LOGISTICS (unit_price, freight,         │    │
+│  │           duty, handling → NULL for LOGISTICS_ROLE)              │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │                  PERSISTENCE LAYER                               │    │
+│  │                                                                  │    │
+│  │  CHAT_SESSIONS table — stores user conversations as VARIANT      │    │
+│  │  (session_id, user_name, title, messages, is_shared, timestamps) │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### CoCo CLI Skills Used
+
+| CoCo Skill | How it was used |
+|:-----------|:----------------|
+| **`sql-author`** | Generated all 20 SQL scripts — tables, views, semantic view, RBAC, masking policies |
+| **`developing-with-streamlit-in-snowflake`** | Built the 6-tab Streamlit app with custom CSS, chat UI, and auto-charting |
+| **`agent-studio`** | Designed the semantic view with AI guardrails (`AI_SQL_GENERATION`, `AI_QUESTION_CATEGORIZATION`) |
+| **`data-governance`** | Configured RBAC roles, column-level masking, and privilege grants |
+| **`html-authoring`** | Generated styled HTML reports for PDF download |
+| **`cortex-ai-function-studio`** | Integrated Cortex Analyst REST API for multi-turn natural language queries |
+
+### Data Sources
+
+| Source | Type | Description |
+|:-------|:-----|:------------|
+| `ORDERS_ERP` | Structured (ERP system) | Order headers and lines with quantities, prices, promised dates |
+| `SHIPMENTS_LOGISTICS` | Structured (Logistics TMS) | Shipment events — dispatch, gate-in, customer receipt timestamps, freight costs |
+| `PARTS` / `PLANTS` / `CUSTOMERS` | Structured (Master data) | Dimension tables for parts catalog, plant locations, customer profiles |
+| `SUPPLIERS_V` | Structured (Reconciled) | Unified supplier view bridging ERP (`SUP-nnn`) and logistics (`LS-nnnn`) ID schemes via `SUPPLIER_XREF` |
+| `INVENTORY_SNAPSHOT` | Structured (Daily snapshot) | Daily on-hand quantity and average daily usage per plant and part |
+
+---
+
+## 3. Impact Statement
+
+### Measurable Outcomes
+
+| Metric | Before | After | Improvement |
+|:-------|:-------|:------|:------------|
+| **Time to answer a KPI question** | 15–30 min (write SQL, validate, format) | **< 10 seconds** (type in plain English) | **~99% reduction** |
+| **Metric definitions in use** | 3+ conflicting per KPI | **1 governed definition** per KPI | **100% consistency** |
+| **Cost data exposure risk** | Manual access control, easy to misconfigure | **Automatic column-level masking** — provable in-app | **Zero leakage** |
+| **Report generation time** | Hours (manual Excel + PowerPoint) | **1 click** (CSV + PDF auto-generated) | **~95% reduction** |
+| **Chat session persistence** | None — lost on page refresh | **Snowflake-backed** — resume, share, audit | **Full traceability** |
+| **Ungoverned metric requests** | Silently produce wrong answers | **AI guardrails refuse and redirect** | **Zero drift** |
+
+### Scalability Potential
+
+**Horizontal scaling — more metrics, more teams:**
+- The semantic view pattern scales to any number of metrics and dimensions. Adding a new governed KPI (e.g., `PERFECT_ORDER_RATE`) requires one `METRICS` line in the semantic view — Cortex Analyst picks it up immediately with no app code changes.
+- Adding new roles (e.g., `FINANCE_ROLE`, `EXECUTIVE_ROLE`) requires one SQL grant + optional masking policy — the app dynamically reads roles from config.
+
+**Vertical scaling — more data volume:**
+- Snowflake's elastic compute handles billions of order lines without app changes. The semantic view pushes all computation down to Snowflake — the Streamlit layer only renders results.
+- `CHAT_SESSIONS` table uses `VARIANT` for flexible schema — no migrations needed as chat features evolve.
+
+**Cross-industry extension:**
+- The architecture pattern (semantic view + AI guardrails + RBAC + masking + natural language) is domain-agnostic:
+
+| Industry | Governed Metric Example | Masking Example |
+|:---------|:-----------------------|:----------------|
+| **Healthcare** | 30-day readmission rate | Mask patient PII from operational roles |
+| **Finance** | Value-at-Risk (VaR) | Mask position sizes from compliance |
+| **Retail** | Conversion rate | Mask revenue from store-level roles |
+| **SaaS** | Net Revenue Retention | Mask individual contract values |
+
+### Beyond the Demo
+
+This demo uses synthetic data (4,500 order lines). In production:
+- Connect to real ERP (SAP, Oracle) and logistics (TMS) systems via Snowflake connectors or Snowpipe
+- Add row-level security policies for multi-tenant deployments
+- Enable Snowflake tasks for automated daily refresh of inventory snapshots
+- Integrate with Slack/Teams via notification integrations for KPI alerts
+- Deploy as a Snowflake Native App for distribution across accounts
 
 ---
 
@@ -68,39 +233,6 @@ The **same** `ON_TIME_DELIVERY_RATE` queried under Planning, Procurement, and Lo
 
 ### 6. Analytics
 Platform-wide and per-user chat usage metrics — sessions, messages, leaderboard, activity over time. Shows adoption and engagement.
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Streamlit App (6 tabs)                      │
-│  Dashboard │ Ask │ Before OneTruth │ Consistency │ Masking │ Analytics │
-└──────┬──────────┬──────────────────────┬────────────────────────┘
-       │          │                      │
-       ▼          ▼                      ▼
- ┌───────────┐  ┌────────────┐  ┌──────────────────┐
- │  Cortex   │  │  Direct    │  │  SEMANTIC_VIEW() │
- │  Analyst  │  │  SQL       │  │  × 3 RBAC roles  │
- │  REST API │  │  Queries   │  │                  │
- └─────┬─────┘  └──────┬─────┘  └────────┬─────────┘
-       └────────┬───────┴─────────────────┘
-                ▼
- ┌─────────────────────────────────────────────────────────────┐
- │            SUPPLY_CHAIN_SV  (Semantic View)                 │
- │   4 governed metrics · 33 dimensions · 6 relationships      │
- │   AI_SQL_GENERATION + AI_QUESTION_CATEGORIZATION guardrails │
- ├─────────────────────────────────────────────────────────────┤
- │  ORDER_LINES_V │ PARTS │ PLANTS │ CUSTOMERS │ INVENTORY    │
- │  SUPPLIERS_V   │  (bridged via SUPPLIER_XREF)              │
- ├─────────────────────────────────────────────────────────────┤
- │  MASK_COST_FROM_LOGISTICS  (column-level masking policy)    │
- │  PLANNING_ROLE │ PROCUREMENT_ROLE │ LOGISTICS_ROLE  (RBAC)  │
- ├─────────────────────────────────────────────────────────────┤
- │  CHAT_SESSIONS  (persistent chat storage in Snowflake)      │
- └─────────────────────────────────────────────────────────────┘
-```
 
 ---
 
@@ -216,6 +348,7 @@ onetruth/
 | **Persistence** | Snowflake table (`CHAT_SESSIONS`) for chat history |
 | **Frontend** | Streamlit + Plotly + Custom CSS |
 | **Data** | Pure SQL with `HASH()`-seeded deterministic random generation |
+| **Development** | Built entirely using Snowflake CoCo CLI |
 
 ---
 
@@ -225,6 +358,6 @@ onetruth/
 
 Sunny Pathak (Lead) · Saurav Sharma · Himanshi Sharma
 
-Powered by Snowflake + Cortex Analyst
+Powered by Snowflake + Cortex Analyst + CoCo CLI
 
 </div>
