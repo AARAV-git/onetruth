@@ -377,7 +377,7 @@ GOLD       = "#F59E0B"      # Amber — highlights
 NAVY       = "#0F172A"      # Slate 900 — text/headings
 SLATE      = "#334155"      # Slate 700 — secondary text
 MUTED      = "#94A3B8"      # Slate 400 — captions
-BG_MAIN    = "#FAFBFC"      # Page background
+BG_MAIN    = "#F1F5F9"      # Slate 100 — page background
 BG_CARD    = "#FFFFFF"       # Card background
 BORDER     = "#E2E8F0"      # Slate 200 — borders
 CHART_PALETTE = [BRAND, ACCENT, PURPLE, GOLD, WARN, "#38BDF8"]
@@ -393,9 +393,18 @@ st.set_page_config(
 
 st.markdown(f"""
 <style>
-    /* ---- Page background ---- */
+    /* ---- Page background & text ---- */
     .stApp {{
         background-color: {BG_MAIN};
+    }}
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4 {{
+        color: {NAVY} !important;
+    }}
+    .stApp p, .stApp span, .stApp li, .stApp label, .stApp div {{
+        color: {SLATE};
+    }}
+    .stApp .stMarkdown p {{
+        color: {SLATE};
     }}
 
     /* ---- Sidebar ---- */
@@ -446,17 +455,35 @@ st.markdown(f"""
         font-size: 1.75rem;
         font-weight: 700;
     }}
+    div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {{
+        color: {SLATE} !important;
+    }}
 
     /* ---- Tabs ---- */
     div[data-testid="stTabs"] button[data-baseweb="tab"] {{
         font-weight: 600;
         font-size: 0.9rem;
-        color: {MUTED};
+        color: {SLATE} !important;
         padding: 10px 20px;
     }}
     div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {{
         color: {BRAND} !important;
         border-bottom: 3px solid {BRAND} !important;
+    }}
+
+    /* ---- Selectbox / inputs ---- */
+    div[data-testid="stSelectbox"] label,
+    div[data-testid="stTextInput"] label {{
+        color: {SLATE} !important;
+    }}
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {{
+        color: {NAVY} !important;
+        background: {BG_CARD} !important;
+    }}
+
+    /* ---- Caption text ---- */
+    .stCaption, small {{
+        color: {MUTED} !important;
     }}
 
     /* ---- Chat messages ---- */
@@ -486,6 +513,12 @@ st.markdown(f"""
         padding: 12px 18px;
         display: inline-block;
         box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }}
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] p {{
+        color: {SLATE} !important;
+    }}
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] strong {{
+        color: {NAVY} !important;
     }}
 
     /* ---- Chat input bar ---- */
@@ -544,7 +577,19 @@ st.markdown(f"""
     }}
     details summary {{
         font-weight: 600;
-        color: {SLATE};
+        color: {SLATE} !important;
+    }}
+    details summary span {{
+        color: {SLATE} !important;
+    }}
+
+    /* ---- Code blocks ---- */
+    pre {{
+        background: #1E293B !important;
+        border-radius: 8px !important;
+    }}
+    code {{
+        color: #E2E8F0 !important;
     }}
 
     /* ---- Dataframe ---- */
