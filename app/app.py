@@ -8,6 +8,7 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 import snowflake.connector
+from snowflake.connector.errors import ProgrammingError, DatabaseError
 
 # ---------------------------------------------------------------------------
 # Config
@@ -34,11 +35,13 @@ WHERE promised_quarter = '2026-Q3'
 # ---------------------------------------------------------------------------
 # Connection
 # ---------------------------------------------------------------------------
-@st.cache_resource
+@st.cache_resource(ttl=3600)
 def get_connection():
+    extra = {"client_session_keep_alive": True}
+
     # Method 1: [connections.snowflake] section in secrets
     try:
-        params = dict(st.secrets["connections"]["snowflake"])
+        params = {**dict(st.secrets["connections"]["snowflake"]), **extra}
         return snowflake.connector.connect(**params)
     except Exception:
         pass
@@ -50,13 +53,15 @@ def get_connection():
             if k in ("account", "user", "password", "warehouse", "database", "role")
         }
         if "account" in params and "user" in params:
-            return snowflake.connector.connect(**params)
+            return snowflake.connector.connect(**{**params, **extra})
     except Exception:
         pass
 
     # Method 3: local ~/.snowflake/connections.toml
     try:
-        return snowflake.connector.connect(connection_name=CONNECTION_NAME)
+        return snowflake.connector.connect(
+            connection_name=CONNECTION_NAME, **extra
+        )
     except Exception:
         pass
 
@@ -82,20 +87,43 @@ def get_connection():
     st.stop()
 
 
+def _reconnect():
+    """Clear the cached connection and create a fresh one."""
+    get_connection.clear()
+    return get_connection()
+
+
+def _with_reconnect(fn):
+    """Run fn(conn); on auth failure, reconnect once and retry with new conn."""
+    conn = get_connection()
+    try:
+        return fn(conn)
+    except (ProgrammingError, DatabaseError) as e:
+        cause = str(e.__cause__) if e.__cause__ else str(e)
+        if "ReauthenticationRequest" in cause or "Authentication token has expired" in cause:
+            conn = _reconnect()
+            return fn(conn)
+        raise
+
+
 def use_role(conn, role_name):
-    cur = conn.cursor()
-    cur.execute(f"USE ROLE {role_name}")
-    cur.execute(f"USE WAREHOUSE {WAREHOUSE}")
-    cur.close()
+    def _do(c):
+        cur = c.cursor()
+        cur.execute(f"USE ROLE {role_name}")
+        cur.execute(f"USE WAREHOUSE {WAREHOUSE}")
+        cur.close()
+    _with_reconnect(_do)
 
 
 def run_query(conn, sql):
-    cur = conn.cursor()
-    cur.execute(sql)
-    cols = [d[0] for d in cur.description]
-    rows = cur.fetchall()
-    cur.close()
-    return pd.DataFrame(rows, columns=cols)
+    def _do(c):
+        cur = c.cursor()
+        cur.execute(sql)
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        cur.close()
+        return pd.DataFrame(rows, columns=cols)
+    return _with_reconnect(_do)
 
 # ---------------------------------------------------------------------------
 # Metric metadata (cached once)
@@ -119,22 +147,24 @@ def load_metric_metadata():
 # Cortex Analyst REST call
 # ---------------------------------------------------------------------------
 def call_analyst(conn, question):
-    token = conn.rest.token
-    host = conn.host
-    url = f"https://{host}/api/v2/cortex/analyst/message"
-    headers = {
-        "Authorization": f'Snowflake Token="{token}"',
-        "Content-Type": "application/json",
-    }
-    body = {
-        "messages": [
-            {"role": "user", "content": [{"type": "text", "text": question}]}
-        ],
-        "semantic_view": SEMANTIC_VIEW,
-    }
-    resp = requests.post(url, headers=headers, json=body, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+    def _do(c):
+        token = c.rest.token
+        host = c.host
+        url = f"https://{host}/api/v2/cortex/analyst/message"
+        headers = {
+            "Authorization": f'Snowflake Token="{token}"',
+            "Content-Type": "application/json",
+        }
+        body = {
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": question}]}
+            ],
+            "semantic_view": SEMANTIC_VIEW,
+        }
+        resp = requests.post(url, headers=headers, json=body, timeout=120)
+        resp.raise_for_status()
+        return resp.json()
+    return _with_reconnect(_do)
 
 
 def parse_analyst_response(resp):
