@@ -400,17 +400,11 @@ st.markdown(f"""
     .stApp h1, .stApp h2, .stApp h3, .stApp h4 {{
         color: {NAVY} !important;
     }}
-    .stApp p, .stApp li, .stApp label {{
+    .stApp p, .stApp span, .stApp li, .stApp label, .stApp div {{
         color: {SLATE};
     }}
     .stApp .stMarkdown p {{
         color: {SLATE};
-    }}
-    /* Exclude chat messages from global text color */
-    div[data-testid="stChatMessage"] p,
-    div[data-testid="stChatMessage"] span,
-    div[data-testid="stChatMessage"] div {{
-        color: inherit;
     }}
 
     /* ---- Sidebar ---- */
