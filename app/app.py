@@ -1092,13 +1092,13 @@ with tab_ask:
         # ── Active chat session ──
         else:
             # Minimal top bar
-            col_role, col_spacer, col_actions = st.columns([2, 3, 2])
+            col_role, col_spacer, col_actions = st.columns([2, 3, 3])
             with col_role:
                 persona = st.selectbox("Persona", list(ROLES.keys()), label_visibility="collapsed")
                 role_name = ROLES[persona]
                 use_role(conn, role_name)
             with col_actions:
-                ac1, ac2, ac3 = st.columns(3)
+                ac1, ac2, ac3, ac4 = st.columns(4)
                 with ac1:
                     if st.button("Share"):
                         save_session(
@@ -1111,6 +1111,48 @@ with tab_ask:
                         )
                         st.toast(f"Shared! Link: ?session={st.session_state.active_session_id}")
                 with ac2:
+                    # Export chat
+                    if st.session_state.chat_history:
+                        chat_csv_rows = []
+                        chat_html_msgs = ""
+                        for turn in st.session_state.chat_history:
+                            role = turn["role"]
+                            msg = turn.get("display", "")
+                            sql = turn.get("sql", "")
+                            chat_csv_rows.append({"Role": role, "Message": msg, "SQL": sql})
+                            label = "You" if role == "user" else "OneTruth"
+                            color = "#0EA5E9" if role == "user" else "#059669"
+                            chat_html_msgs += f'<div style="margin:12px 0;"><strong style="color:{color};">{label}</strong><p>{msg}</p>'
+                            if sql:
+                                chat_html_msgs += f'<pre style="background:#0F172A; color:#F8FAFC; padding:10px; border-radius:6px; font-size:0.85rem;">{sql}</pre>'
+                            chat_html_msgs += "</div>"
+                        df_chat_export = pd.DataFrame(chat_csv_rows)
+                        chat_html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{st.session_state.session_title}</title>
+<style>body{{font-family:-apple-system,sans-serif;margin:40px;color:#1E293B;}}
+h1{{color:#0EA5E9;}} .badge{{background:#0EA5E9;color:white;padding:2px 10px;border-radius:12px;font-size:0.8rem;}}
+.footer{{margin-top:40px;font-size:0.8rem;color:#94A3B8;text-align:center;}}</style></head>
+<body><h1>OneTruth Chat Export</h1>
+<p><span class="badge">{st.session_state.session_title}</span></p>
+{chat_html_msgs}
+<p class="footer">OneTruth — Team NeuroForge | Snowflake + Cortex Analyst</p>
+</body></html>"""
+                        dl_csv, dl_html = st.columns(2)
+                        with dl_csv:
+                            st.download_button(
+                                label="CSV",
+                                data=df_chat_export.to_csv(index=False),
+                                file_name=f"chat_{st.session_state.session_title[:30]}.csv",
+                                mime="text/csv",
+                            )
+                        with dl_html:
+                            st.download_button(
+                                label="PDF",
+                                data=chat_html,
+                                file_name=f"chat_{st.session_state.session_title[:30]}.html",
+                                mime="text/html",
+                            )
+                with ac3:
                     if st.button("New"):
                         st.session_state.chat_history = []
                         st.session_state.active_session_id = str(uuid.uuid4())
@@ -1118,7 +1160,7 @@ with tab_ask:
                         st.session_state["_ask_ready"] = True
                         st.query_params.clear()
                         st.rerun()
-                with ac3:
+                with ac4:
                     if st.button("Back"):
                         st.session_state.chat_history = []
                         st.session_state.session_title = "New Chat"
