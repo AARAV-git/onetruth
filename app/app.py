@@ -531,7 +531,14 @@ st.markdown(f"""
     }}
     div[data-testid="stChatInput"]:focus-within {{
         border-color: {BRAND} !important;
-        box-shadow: 0 2px 16px rgba(41,181,232,0.15) !important;
+        box-shadow: 0 2px 16px rgba(14,165,233,0.15) !important;
+    }}
+    div[data-testid="stChatInput"] textarea {{
+        color: {NAVY} !important;
+        caret-color: {BRAND} !important;
+    }}
+    div[data-testid="stChatInput"] textarea::placeholder {{
+        color: {MUTED} !important;
     }}
 
     /* ---- Primary buttons ---- */
