@@ -300,6 +300,50 @@ TIME_PATTERNS = re.compile(
     r"(DATE|MONTH|QUARTER|YEAR|WEEK|PERIOD|TIME)", re.IGNORECASE
 )
 
+_download_counter = [0]
+
+def _render_download_buttons(result_df, container):
+    _download_counter[0] += 1
+    key_suffix = _download_counter[0]
+    csv_data = result_df.to_csv(index=False)
+    # Build HTML table
+    html_rows = ""
+    for _, r in result_df.iterrows():
+        cells = "".join(f"<td>{v}</td>" for v in r.values)
+        html_rows += f"<tr>{cells}</tr>"
+    headers = "".join(f"<th>{c}</th>" for c in result_df.columns)
+    html_data = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>OneTruth Data Export</title>
+<style>body{{font-family:-apple-system,sans-serif;margin:40px;color:#1E293B;}}
+h1{{color:#0EA5E9;font-size:1.5rem;}}
+table{{border-collapse:collapse;width:100%;margin:12px 0;}}
+th,td{{border:1px solid #CBD5E1;padding:8px 12px;text-align:left;}}
+th{{background:#0EA5E9;color:white;font-weight:600;}}
+tr:nth-child(even){{background:#F1F5F9;}}
+.footer{{margin-top:30px;font-size:0.75rem;color:#94A3B8;text-align:center;}}</style></head>
+<body><h1>OneTruth Data Export</h1>
+<table><tr>{headers}</tr>{html_rows}</table>
+<p class="footer">OneTruth — Team NeuroForge | Snowflake + Cortex Analyst</p>
+</body></html>"""
+    dl1, dl2, dl_space = container.columns([1, 1, 4])
+    with dl1:
+        st.download_button(
+            label="Download CSV",
+            data=csv_data,
+            file_name="onetruth_data.csv",
+            mime="text/csv",
+            key=f"dl_csv_{key_suffix}",
+        )
+    with dl2:
+        st.download_button(
+            label="Download PDF",
+            data=html_data,
+            file_name="onetruth_data.html",
+            mime="text/html",
+            key=f"dl_html_{key_suffix}",
+        )
+
+
 def auto_visualize(result_df, container):
     if result_df.empty:
         container.warning("Query returned no rows.")
@@ -317,6 +361,7 @@ def auto_visualize(result_df, container):
                 col_name.replace("_", " ").title(),
                 f"{val:,.2f}" if isinstance(val, float) else str(val),
             )
+        _render_download_buttons(result_df, container)
         return
 
     if nrows == 1:
@@ -331,6 +376,7 @@ def auto_visualize(result_df, container):
                     st.metric(label, f"{val:,.2f}")
                 else:
                     st.metric(label, str(val))
+        _render_download_buttons(result_df, container)
         return
 
     str_cols = [c for c in result_df.columns if result_df[c].dtype == "object"]
@@ -347,6 +393,7 @@ def auto_visualize(result_df, container):
         )
         fig.update_layout(height=420, xaxis_title=None)
         container.plotly_chart(fig, use_container_width=True)
+        _render_download_buttons(result_df, container)
         with container.expander("Data table"):
             st.dataframe(df_sorted, use_container_width=True)
         return
@@ -361,11 +408,13 @@ def auto_visualize(result_df, container):
         )
         fig.update_layout(height=420, xaxis_title=None)
         container.plotly_chart(fig, use_container_width=True)
+        _render_download_buttons(result_df, container)
         with container.expander("Data table"):
             st.dataframe(result_df, use_container_width=True)
         return
 
     container.dataframe(result_df, use_container_width=True)
+    _render_download_buttons(result_df, container)
 
 # ---------------------------------------------------------------------------
 # Theme colors
