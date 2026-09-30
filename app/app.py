@@ -292,10 +292,10 @@ with st.sidebar:
     st.divider()
     try:
         conn = get_connection()
-        st.success("Connected to Snowflake", icon="*")
+        st.success("Connected to Snowflake")
     except Exception:
         conn = None
-        st.error("Disconnected", icon="*")
+        st.error("Disconnected")
     st.divider()
     st.markdown(
         "**Governed Metrics**\n"
