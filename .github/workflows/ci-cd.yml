@@ -107,9 +107,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: |
-          pip install -r app/requirements.txt
-          pip install py_compile
+        run: pip install -r app/requirements.txt
 
       - name: Python syntax check
         run: |
