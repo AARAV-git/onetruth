@@ -686,8 +686,8 @@ with tab_ask:
     else:
         ask_user = st.session_state["user_name"]
 
-        # If no active chat is loaded, show the session picker
-        if not st.session_state.chat_history and st.session_state.session_title == "New Chat":
+        # If no active chat is loaded and not ready, show the session picker
+        if not st.session_state.chat_history and st.session_state.session_title == "New Chat" and not st.session_state.get("_ask_ready"):
             st.markdown(f"### Welcome back, {ask_user}")
 
             col_new, col_spacer = st.columns([1, 3])
@@ -758,12 +758,14 @@ with tab_ask:
                         st.session_state.chat_history = []
                         st.session_state.active_session_id = str(uuid.uuid4())
                         st.session_state.session_title = "New Chat"
+                        st.session_state["_ask_ready"] = True
                         st.query_params.clear()
                         st.rerun()
                 with ac3:
                     if st.button("Back"):
                         st.session_state.chat_history = []
                         st.session_state.session_title = "New Chat"
+                        st.session_state["_ask_ready"] = False
                         st.query_params.clear()
                         st.rerun()
 
