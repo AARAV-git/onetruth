@@ -597,16 +597,49 @@ st.markdown(f"""
 
     /* ---- Code blocks ---- */
     pre {{
-        background: #1E293B !important;
+        background: #0F172A !important;
         border-radius: 8px !important;
-        padding: 12px !important;
+        padding: 14px !important;
+        border: 1px solid #334155 !important;
     }}
     pre code {{
-        color: #E2E8F0 !important;
+        color: #F8FAFC !important;
+        font-size: 0.85rem !important;
+    }}
+    pre code .token.keyword,
+    pre code .hljs-keyword {{
+        color: #38BDF8 !important;
+    }}
+    pre code .token.string,
+    pre code .hljs-string {{
+        color: #FB923C !important;
+    }}
+    pre code .token.function,
+    pre code .hljs-title {{
+        color: #38BDF8 !important;
+    }}
+    pre code .token.number,
+    pre code .hljs-number {{
+        color: #FB923C !important;
+    }}
+    pre code .token.operator {{
+        color: #F8FAFC !important;
+    }}
+    pre code .token.comment,
+    pre code .hljs-comment {{
+        color: #64748B !important;
+    }}
+    /* Force all code text white if syntax highlighting is missing */
+    div[data-testid="stCode"] pre {{
+        background: #0F172A !important;
+    }}
+    div[data-testid="stCode"] pre code,
+    div[data-testid="stCode"] pre code span {{
+        color: #F8FAFC !important;
     }}
     code {{
-        color: {BRAND} !important;
-        background: rgba(14,165,233,0.1) !important;
+        color: #38BDF8 !important;
+        background: rgba(56,189,248,0.1) !important;
         padding: 2px 6px;
         border-radius: 4px;
     }}
