@@ -599,9 +599,16 @@ st.markdown(f"""
     pre {{
         background: #1E293B !important;
         border-radius: 8px !important;
+        padding: 12px !important;
+    }}
+    pre code {{
+        color: #E2E8F0 !important;
     }}
     code {{
-        color: #E2E8F0 !important;
+        color: {BRAND} !important;
+        background: rgba(14,165,233,0.1) !important;
+        padding: 2px 6px;
+        border-radius: 4px;
     }}
 
     /* ---- Dataframe ---- */
