@@ -368,12 +368,18 @@ def auto_visualize(result_df, container):
 # ---------------------------------------------------------------------------
 # Theme colors
 # ---------------------------------------------------------------------------
-BRAND = "#29B5E8"
-ACCENT = "#0D9373"
-WARN   = "#FF6F61"
-PURPLE = "#7C3AED"
-GOLD   = "#F59E0B"
-NAVY   = "#0F172A"
+BRAND      = "#29B5E8"      # Snowflake blue
+BRAND_DARK = "#1A8FC4"      # Darker blue for hover/accents
+ACCENT     = "#10B981"      # Emerald green — success / governed
+WARN       = "#F43F5E"      # Rose — alerts / masked
+PURPLE     = "#8B5CF6"      # Violet — Cortex Analyst
+GOLD       = "#F59E0B"      # Amber — highlights
+NAVY       = "#0F172A"      # Slate 900 — text/headings
+SLATE      = "#334155"      # Slate 700 — secondary text
+MUTED      = "#94A3B8"      # Slate 400 — captions
+BG_MAIN    = "#FAFBFC"      # Page background
+BG_CARD    = "#FFFFFF"       # Card background
+BORDER     = "#E2E8F0"      # Slate 200 — borders
 CHART_PALETTE = [BRAND, ACCENT, PURPLE, GOLD, WARN, "#38BDF8"]
 
 # ---------------------------------------------------------------------------
@@ -387,79 +393,179 @@ st.set_page_config(
 
 st.markdown(f"""
 <style>
+    /* ---- Page background ---- */
+    .stApp {{
+        background-color: {BG_MAIN};
+    }}
+
+    /* ---- Sidebar ---- */
     section[data-testid="stSidebar"] {{
         background: linear-gradient(180deg, {NAVY} 0%, #1E293B 100%);
     }}
     section[data-testid="stSidebar"] * {{
-        color: #E2E8F0 !important;
+        color: #CBD5E1 !important;
+    }}
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3,
+    section[data-testid="stSidebar"] strong {{
+        color: #F1F5F9 !important;
     }}
     section[data-testid="stSidebar"] hr {{
-        border-color: rgba(255,255,255,0.12);
+        border-color: rgba(255,255,255,0.08);
     }}
+    section[data-testid="stSidebar"] button {{
+        background: rgba(255,255,255,0.06) !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
+        border-radius: 8px !important;
+        color: #E2E8F0 !important;
+        transition: background 0.2s;
+    }}
+    section[data-testid="stSidebar"] button:hover {{
+        background: rgba(255,255,255,0.12) !important;
+    }}
+
+    /* ---- Metric cards ---- */
     div[data-testid="stMetric"] {{
-        background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
-        border: 1px solid #DBEAFE;
+        background: {BG_CARD};
+        border: 1px solid {BORDER};
         border-left: 4px solid {BRAND};
         border-radius: 12px;
-        padding: 16px 20px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        padding: 18px 22px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
     }}
     div[data-testid="stMetric"] label {{
-        color: #64748B !important;
+        color: {MUTED} !important;
         font-weight: 600;
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.06em;
     }}
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
         color: {NAVY} !important;
-        font-size: 1.8rem;
+        font-size: 1.75rem;
         font-weight: 700;
     }}
-    button[data-baseweb="tab"] {{
+
+    /* ---- Tabs ---- */
+    div[data-testid="stTabs"] button[data-baseweb="tab"] {{
         font-weight: 600;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
+        color: {MUTED};
+        padding: 10px 20px;
     }}
-    button[data-baseweb="tab"][aria-selected="true"] {{
+    div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {{
         color: {BRAND} !important;
-        border-bottom-color: {BRAND} !important;
+        border-bottom: 3px solid {BRAND} !important;
     }}
+
+    /* ---- Chat messages ---- */
     div[data-testid="stChatMessage"] {{
         border: none;
-        padding: 12px 0;
-        margin-bottom: 0;
+        padding: 8px 0;
+        margin-bottom: 4px;
+        background: transparent !important;
     }}
     /* User bubble */
     div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] {{
-        background: {BRAND};
+        background: linear-gradient(135deg, {BRAND} 0%, {BRAND_DARK} 100%);
         color: white !important;
-        border-radius: 18px 18px 4px 18px;
-        padding: 10px 16px;
+        border-radius: 20px 20px 6px 20px;
+        padding: 12px 18px;
         display: inline-block;
+        box-shadow: 0 2px 8px rgba(41,181,232,0.2);
     }}
     div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] p {{
         color: white !important;
     }}
     /* Assistant bubble */
     div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] {{
-        background: #F1F5F9;
-        border-radius: 18px 18px 18px 4px;
-        padding: 10px 16px;
+        background: {BG_CARD};
+        border: 1px solid {BORDER};
+        border-radius: 20px 20px 20px 6px;
+        padding: 12px 18px;
         display: inline-block;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }}
-    /* Chat input bar */
+
+    /* ---- Chat input bar ---- */
     div[data-testid="stChatInput"] {{
-        border: 2px solid {BRAND} !important;
-        border-radius: 24px !important;
+        border: 2px solid {BORDER} !important;
+        border-radius: 28px !important;
+        background: {BG_CARD} !important;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important;
+        transition: border-color 0.2s;
     }}
+    div[data-testid="stChatInput"]:focus-within {{
+        border-color: {BRAND} !important;
+        box-shadow: 0 2px 16px rgba(41,181,232,0.15) !important;
+    }}
+
+    /* ---- Primary buttons ---- */
+    button[kind="primary"] {{
+        background: linear-gradient(135deg, {BRAND} 0%, {BRAND_DARK} 100%) !important;
+        border: none !important;
+        border-radius: 10px !important;
+        font-weight: 600 !important;
+        box-shadow: 0 2px 8px rgba(41,181,232,0.25) !important;
+        transition: transform 0.15s, box-shadow 0.15s;
+    }}
+    button[kind="primary"]:hover {{
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px rgba(41,181,232,0.35) !important;
+    }}
+
+    /* ---- Secondary buttons ---- */
+    button[kind="secondary"] {{
+        border: 1px solid {BORDER} !important;
+        border-radius: 10px !important;
+        color: {SLATE} !important;
+        font-weight: 500 !important;
+        background: {BG_CARD} !important;
+        transition: background 0.15s, border-color 0.15s;
+    }}
+    button[kind="secondary"]:hover {{
+        background: #F1F5F9 !important;
+        border-color: {BRAND} !important;
+        color: {BRAND} !important;
+    }}
+
+    /* ---- Alert badges ---- */
     div[data-testid="stAlert"] {{
         border-radius: 10px;
+        border-left-width: 4px;
     }}
+
+    /* ---- Expander ---- */
     details {{
-        border: 1px solid #E2E8F0 !important;
+        border: 1px solid {BORDER} !important;
         border-radius: 10px !important;
+        background: {BG_CARD} !important;
     }}
+    details summary {{
+        font-weight: 600;
+        color: {SLATE};
+    }}
+
+    /* ---- Dataframe ---- */
+    div[data-testid="stDataFrame"] {{
+        border: 1px solid {BORDER};
+        border-radius: 10px;
+        overflow: hidden;
+    }}
+
+    /* ---- Divider ---- */
+    hr {{
+        border-color: {BORDER} !important;
+    }}
+
+    /* ---- Footer ---- */
     footer {{visibility: hidden;}}
+
+    /* ---- Suggestion cards on welcome screen ---- */
+    .stButton > button {{
+        transition: all 0.15s ease;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -501,17 +607,22 @@ if shared_sid and shared_sid != st.session_state.get("_loaded_shared_sid"):
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.markdown(
-        f'<h1 style="margin-bottom:0; font-size:1.8rem;">OneTruth</h1>'
-        f'<p style="color:{BRAND} !important; margin-top:0; font-size:0.9rem;">'
-        f'Governed Supply Chain Analytics</p>',
+        f'<div style="text-align:center; padding: 8px 0 4px 0;">'
+        f'<h1 style="margin:0; font-size:1.6rem; color:#F1F5F9 !important; font-weight:700;">OneTruth</h1>'
+        f'<p style="margin:4px 0 0 0; font-size:0.8rem; color:{BRAND} !important; letter-spacing:0.08em; text-transform:uppercase;">Supply Chain Analytics</p>'
+        f'</div>',
         unsafe_allow_html=True,
     )
     st.divider()
 
     sidebar_user = st.session_state.get("user_name", "")
     if sidebar_user:
-        st.markdown(f"Logged in as **{sidebar_user}**")
-        if st.button("Log out", use_container_width=True):
+        st.markdown(
+            f'<p style="font-size:0.85rem; color:#94A3B8 !important;">Signed in as</p>'
+            f'<p style="font-size:1rem; color:#F1F5F9 !important; font-weight:600; margin-top:-8px;">{sidebar_user}</p>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Sign out", use_container_width=True):
             st.session_state["user_name"] = ""
             st.session_state.chat_history = []
             st.session_state.session_title = "New Chat"
@@ -519,12 +630,11 @@ with st.sidebar:
             st.rerun()
         st.divider()
 
-        # Quick session list in sidebar
-        st.markdown("**Recent Chats**")
+        st.markdown('<p style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748B !important; font-weight:600;">Recent Chats</p>', unsafe_allow_html=True)
         try:
             df_sidebar = list_sessions(conn, sidebar_user)
             if not df_sidebar.empty:
-                for _, srow in df_sidebar.head(10).iterrows():
+                for _, srow in df_sidebar.head(8).iterrows():
                     sid = srow["SESSION_ID"]
                     title = srow["TITLE"] or "Untitled"
                     is_active = sid == st.session_state.active_session_id
@@ -537,6 +647,7 @@ with st.sidebar:
                             st.session_state.session_title = data["title"]
                             st.session_state.readonly_mode = False
                             st.session_state.shared_owner = None
+                            st.session_state["_ask_ready"] = True
                             st.query_params.clear()
                             st.rerun()
             else:
@@ -544,18 +655,26 @@ with st.sidebar:
         except Exception:
             st.caption("No chats yet.")
     else:
-        st.caption("Go to the **Ask** tab to sign in.")
+        st.markdown(
+            f'<p style="font-size:0.85rem; color:#94A3B8 !important; text-align:center; padding:12px 0;">Go to the <strong style="color:{BRAND} !important;">Ask</strong> tab to sign in</p>',
+            unsafe_allow_html=True,
+        )
 
     st.divider()
     st.markdown(
-        f"**Governed Metrics**\n\n"
-        f"- `ON_TIME_DELIVERY_RATE`\n"
-        f"- `FILL_RATE`\n"
-        f"- `DAYS_OF_INVENTORY`\n"
-        f"- `LANDED_COST_PER_UNIT`"
+        f'<p style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748B !important; font-weight:600;">Governed Metrics</p>',
+        unsafe_allow_html=True,
     )
+    for metric_name in ["ON_TIME_DELIVERY_RATE", "FILL_RATE", "DAYS_OF_INVENTORY", "LANDED_COST_PER_UNIT"]:
+        st.markdown(
+            f'<p style="font-size:0.8rem; color:#CBD5E1 !important; margin:2px 0; padding:4px 8px; background:rgba(255,255,255,0.04); border-radius:6px; font-family:monospace;">{metric_name}</p>',
+            unsafe_allow_html=True,
+        )
     st.divider()
-    st.caption("Built with Snowflake + Cortex Analyst")
+    st.markdown(
+        f'<p style="font-size:0.7rem; color:#64748B !important; text-align:center;">Built with Snowflake + Cortex Analyst</p>',
+        unsafe_allow_html=True,
+    )
 
 # ---------------------------------------------------------------------------
 # Tabs
