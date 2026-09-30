@@ -554,8 +554,8 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_dash, tab_ask, tab_before, tab_consistency, tab_masking = st.tabs(
-    ["Dashboard", "Ask", "Before OneTruth", "Consistency", "Masking"]
+tab_dash, tab_ask, tab_before, tab_consistency, tab_masking, tab_analytics = st.tabs(
+    ["Dashboard", "Ask", "Before OneTruth", "Consistency", "Masking", "Analytics"]
 )
 
 # ── Tab 1: Executive Dashboard ────────────────────────────────────────────
@@ -1020,3 +1020,144 @@ with tab_masking:
     )
 
     use_role(conn, "ACCOUNTADMIN")
+
+# ── Tab 6: Analytics ─────────────────────────────────────────────────────
+with tab_analytics:
+    st.subheader("Chat Analytics")
+    use_role(conn, "ACCOUNTADMIN")
+
+    current_user = st.session_state.get("user_name", "")
+
+    # ---- Load all session data ----
+    try:
+        df_all = run_query(conn, """
+            SELECT SESSION_ID, USER_NAME, TITLE, CREATED_AT, UPDATED_AT,
+                   IS_SHARED, ARRAY_SIZE(MESSAGES) AS MSG_COUNT
+            FROM ONETRUTH.APP.CHAT_SESSIONS
+            ORDER BY UPDATED_AT DESC
+        """)
+    except Exception:
+        df_all = pd.DataFrame()
+
+    if df_all.empty:
+        st.info("No chat sessions yet. Start a conversation in the **Ask** tab!")
+    else:
+        # ----------------------------------------------------------------
+        # Overall Platform Metrics
+        # ----------------------------------------------------------------
+        st.markdown("### Platform Overview")
+        total_sessions = len(df_all)
+        total_users = df_all["USER_NAME"].nunique()
+        total_messages = int(df_all["MSG_COUNT"].sum()) if "MSG_COUNT" in df_all.columns else 0
+        shared_count = int(df_all["IS_SHARED"].sum()) if "IS_SHARED" in df_all.columns else 0
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Sessions", f"{total_sessions}")
+        m2.metric("Unique Users", f"{total_users}")
+        m3.metric("Total Messages", f"{total_messages}")
+        m4.metric("Shared Chats", f"{shared_count}")
+
+        st.divider()
+
+        col_left, col_right = st.columns(2)
+
+        # Sessions per user (bar chart)
+        with col_left:
+            st.markdown("**Sessions per User**")
+            df_per_user = df_all.groupby("USER_NAME").size().reset_index(name="Sessions")
+            df_per_user = df_per_user.sort_values("Sessions", ascending=False).head(15)
+            fig_users = px.bar(
+                df_per_user, x="USER_NAME", y="Sessions",
+                template="plotly_white",
+                color_discrete_sequence=[BRAND],
+            )
+            fig_users.update_layout(height=350, xaxis_title=None, yaxis_title="Sessions")
+            st.plotly_chart(fig_users, use_container_width=True)
+
+        # Messages per user (bar chart)
+        with col_right:
+            st.markdown("**Messages per User**")
+            if "MSG_COUNT" in df_all.columns:
+                df_msg_user = df_all.groupby("USER_NAME")["MSG_COUNT"].sum().reset_index(name="Messages")
+                df_msg_user = df_msg_user.sort_values("Messages", ascending=False).head(15)
+                fig_msgs = px.bar(
+                    df_msg_user, x="USER_NAME", y="Messages",
+                    template="plotly_white",
+                    color_discrete_sequence=[ACCENT],
+                )
+                fig_msgs.update_layout(height=350, xaxis_title=None, yaxis_title="Messages")
+                st.plotly_chart(fig_msgs, use_container_width=True)
+
+        # Sessions over time (line chart)
+        if "CREATED_AT" in df_all.columns:
+            st.markdown("**Sessions Created Over Time**")
+            df_timeline = df_all.copy()
+            df_timeline["DAY"] = pd.to_datetime(df_timeline["CREATED_AT"]).dt.date
+            df_daily = df_timeline.groupby("DAY").size().reset_index(name="Sessions")
+            df_daily = df_daily.sort_values("DAY")
+            fig_timeline = px.area(
+                df_daily, x="DAY", y="Sessions",
+                template="plotly_white",
+                color_discrete_sequence=[PURPLE],
+            )
+            fig_timeline.update_layout(height=300, xaxis_title=None)
+            st.plotly_chart(fig_timeline, use_container_width=True)
+
+        # Leaderboard table
+        st.markdown("**User Leaderboard**")
+        df_leader = df_all.groupby("USER_NAME").agg(
+            Sessions=("SESSION_ID", "count"),
+            Messages=("MSG_COUNT", "sum"),
+            Shared=("IS_SHARED", "sum"),
+            Last_Active=("UPDATED_AT", "max"),
+        ).reset_index().sort_values("Messages", ascending=False)
+        df_leader.columns = ["User", "Sessions", "Messages", "Shared", "Last Active"]
+        st.dataframe(df_leader, use_container_width=True, hide_index=True)
+
+        # ----------------------------------------------------------------
+        # User-Specific Metrics
+        # ----------------------------------------------------------------
+        st.divider()
+
+        if current_user:
+            st.markdown(f"### Your Stats — {current_user}")
+            df_me = df_all[df_all["USER_NAME"] == current_user]
+
+            if df_me.empty:
+                st.info("You have no saved sessions yet.")
+            else:
+                my_sessions = len(df_me)
+                my_messages = int(df_me["MSG_COUNT"].sum())
+                my_shared = int(df_me["IS_SHARED"].sum())
+                avg_msgs = round(my_messages / my_sessions, 1) if my_sessions else 0
+
+                u1, u2, u3, u4 = st.columns(4)
+                u1.metric("Your Sessions", f"{my_sessions}")
+                u2.metric("Your Messages", f"{my_messages}")
+                u3.metric("Avg Msgs/Session", f"{avg_msgs}")
+                u4.metric("Shared by You", f"{my_shared}")
+
+                # Your sessions over time
+                if "CREATED_AT" in df_me.columns:
+                    col_me_left, col_me_right = st.columns(2)
+                    with col_me_left:
+                        st.markdown("**Your Activity Over Time**")
+                        df_me_time = df_me.copy()
+                        df_me_time["DAY"] = pd.to_datetime(df_me_time["CREATED_AT"]).dt.date
+                        df_me_daily = df_me_time.groupby("DAY").size().reset_index(name="Sessions")
+                        fig_me = px.bar(
+                            df_me_daily.sort_values("DAY"), x="DAY", y="Sessions",
+                            template="plotly_white",
+                            color_discrete_sequence=[GOLD],
+                        )
+                        fig_me.update_layout(height=300, xaxis_title=None)
+                        st.plotly_chart(fig_me, use_container_width=True)
+
+                    with col_me_right:
+                        st.markdown("**Your Recent Sessions**")
+                        df_recent = df_me[["TITLE", "MSG_COUNT", "UPDATED_AT", "IS_SHARED"]].head(10).copy()
+                        df_recent.columns = ["Title", "Messages", "Last Updated", "Shared"]
+                        df_recent["Shared"] = df_recent["Shared"].map({True: "Yes", False: "No"})
+                        st.dataframe(df_recent, use_container_width=True, hide_index=True)
+        else:
+            st.info("Enter your name in the sidebar to see your personal stats.")
