@@ -368,18 +368,18 @@ def auto_visualize(result_df, container):
 # ---------------------------------------------------------------------------
 # Theme colors
 # ---------------------------------------------------------------------------
-BRAND      = "#29B5E8"      # Snowflake blue
-BRAND_DARK = "#1A8FC4"      # Darker blue for hover/accents
-ACCENT     = "#10B981"      # Emerald green — success / governed
-WARN       = "#F43F5E"      # Rose — alerts / masked
-PURPLE     = "#8B5CF6"      # Violet — Cortex Analyst
-GOLD       = "#F59E0B"      # Amber — highlights
-NAVY       = "#0F172A"      # Slate 900 — text/headings
-SLATE      = "#334155"      # Slate 700 — secondary text
-MUTED      = "#94A3B8"      # Slate 400 — captions
+BRAND      = "#0EA5E9"      # Sky 500 — vivid Snowflake blue
+BRAND_DARK = "#0284C7"      # Sky 600 — deeper blue for gradients
+ACCENT     = "#059669"      # Emerald 600 — richer green
+WARN       = "#E11D48"      # Rose 600 — stronger red
+PURPLE     = "#7C3AED"      # Violet 600 — vivid purple
+GOLD       = "#D97706"      # Amber 600 — deeper gold
+NAVY       = "#020617"      # Slate 950 — near-black headings
+SLATE      = "#1E293B"      # Slate 800 — dark body text
+MUTED      = "#64748B"      # Slate 500 — readable captions
 BG_MAIN    = "#CBD5E1"      # Slate 300 — muted page background
 BG_CARD    = "#D5DCE6"       # Dull gray — soft cards
-BORDER     = "#E2E8F0"      # Slate 200 — borders
+BORDER     = "#94A3B8"      # Slate 400 — visible borders
 CHART_PALETTE = [BRAND, ACCENT, PURPLE, GOLD, WARN, "#38BDF8"]
 
 # ---------------------------------------------------------------------------
@@ -438,14 +438,14 @@ st.markdown(f"""
     div[data-testid="stMetric"] {{
         background: {BG_CARD};
         border: 1px solid {BORDER};
-        border-left: 4px solid {BRAND};
+        border-left: 5px solid {BRAND};
         border-radius: 12px;
         padding: 18px 22px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }}
     div[data-testid="stMetric"] label {{
         color: {MUTED} !important;
-        font-weight: 600;
+        font-weight: 700;
         font-size: 0.75rem;
         text-transform: uppercase;
         letter-spacing: 0.06em;
@@ -453,7 +453,7 @@ st.markdown(f"""
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
         color: {NAVY} !important;
         font-size: 1.75rem;
-        font-weight: 700;
+        font-weight: 800;
     }}
     div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {{
         color: {SLATE} !important;
@@ -500,7 +500,7 @@ st.markdown(f"""
         border-radius: 20px 20px 6px 20px;
         padding: 12px 18px;
         display: inline-block;
-        box-shadow: 0 2px 8px rgba(41,181,232,0.2);
+        box-shadow: 0 3px 12px rgba(14,165,233,0.3);
     }}
     div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] p {{
         color: white !important;
@@ -508,11 +508,11 @@ st.markdown(f"""
     /* Assistant bubble */
     div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] {{
         background: {BG_CARD};
-        border: 1px solid {BORDER};
+        border: 1.5px solid {BORDER};
         border-radius: 20px 20px 20px 6px;
         padding: 12px 18px;
         display: inline-block;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     }}
     div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] p {{
         color: {SLATE} !important;
@@ -539,26 +539,27 @@ st.markdown(f"""
         background: linear-gradient(135deg, {BRAND} 0%, {BRAND_DARK} 100%) !important;
         border: none !important;
         border-radius: 10px !important;
-        font-weight: 600 !important;
-        box-shadow: 0 2px 8px rgba(41,181,232,0.25) !important;
+        font-weight: 700 !important;
+        color: white !important;
+        box-shadow: 0 3px 10px rgba(14,165,233,0.35) !important;
         transition: transform 0.15s, box-shadow 0.15s;
     }}
     button[kind="primary"]:hover {{
         transform: translateY(-1px);
-        box-shadow: 0 4px 14px rgba(41,181,232,0.35) !important;
+        box-shadow: 0 5px 18px rgba(14,165,233,0.45) !important;
     }}
 
     /* ---- Secondary buttons ---- */
     button[kind="secondary"] {{
-        border: 1px solid {BORDER} !important;
+        border: 2px solid {BORDER} !important;
         border-radius: 10px !important;
-        color: {SLATE} !important;
-        font-weight: 500 !important;
+        color: {NAVY} !important;
+        font-weight: 600 !important;
         background: {BG_CARD} !important;
         transition: background 0.15s, border-color 0.15s;
     }}
     button[kind="secondary"]:hover {{
-        background: #F1F5F9 !important;
+        background: {BG_MAIN} !important;
         border-color: {BRAND} !important;
         color: {BRAND} !important;
     }}
