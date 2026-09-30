@@ -425,9 +425,32 @@ st.markdown(f"""
         border-bottom-color: {BRAND} !important;
     }}
     div[data-testid="stChatMessage"] {{
-        border-radius: 12px;
-        border: 1px solid #E2E8F0;
-        margin-bottom: 8px;
+        border: none;
+        padding: 12px 0;
+        margin-bottom: 0;
+    }}
+    /* User bubble */
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] {{
+        background: {BRAND};
+        color: white !important;
+        border-radius: 18px 18px 4px 18px;
+        padding: 10px 16px;
+        display: inline-block;
+    }}
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] p {{
+        color: white !important;
+    }}
+    /* Assistant bubble */
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] {{
+        background: #F1F5F9;
+        border-radius: 18px 18px 18px 4px;
+        padding: 10px 16px;
+        display: inline-block;
+    }}
+    /* Chat input bar */
+    div[data-testid="stChatInput"] {{
+        border: 2px solid {BRAND} !important;
+        border-radius: 24px !important;
     }}
     div[data-testid="stAlert"] {{
         border-radius: 10px;
@@ -671,47 +694,78 @@ with tab_ask:
 
     # ── Gate: must enter name first ──
     elif not st.session_state.get("user_name"):
-        st.markdown("### Welcome to OneTruth Chat")
-        st.write("Enter your name to start asking questions or resume a previous session.")
-        with st.form("name_gate", clear_on_submit=False):
-            name_input = st.text_input("Your name", placeholder="e.g. Sunny Pathak")
-            submitted = st.form_submit_button("Continue", type="primary")
-        if submitted and name_input.strip():
-            st.session_state["user_name"] = name_input.strip()
-            st.rerun()
-        elif submitted:
-            st.warning("Please enter your name.")
+        st.markdown("")
+        st.markdown("")
+        col_pad1, col_center, col_pad2 = st.columns([1, 2, 1])
+        with col_center:
+            st.markdown(
+                f'<h2 style="text-align:center; color:{NAVY};">Welcome to OneTruth</h2>'
+                f'<p style="text-align:center; color:#64748B;">Enter your name to get started</p>',
+                unsafe_allow_html=True,
+            )
+            with st.form("name_gate", clear_on_submit=False):
+                name_input = st.text_input(
+                    "Your name", placeholder="e.g. Sunny Pathak",
+                    label_visibility="collapsed",
+                )
+                submitted = st.form_submit_button("Continue", type="primary", use_container_width=True)
+            if submitted and name_input.strip():
+                st.session_state["user_name"] = name_input.strip()
+                st.rerun()
+            elif submitted:
+                st.warning("Please enter your name.")
 
     # ── Logged in: show session picker or active chat ──
     else:
         ask_user = st.session_state["user_name"]
 
-        # If no active chat is loaded and not ready, show the session picker
+        # Session picker (no active chat)
         if not st.session_state.chat_history and st.session_state.session_title == "New Chat" and not st.session_state.get("_ask_ready"):
-            st.markdown(f"### Welcome back, {ask_user}")
+            st.markdown("")
+            col_pad1, col_center, col_pad2 = st.columns([1, 2, 1])
+            with col_center:
+                st.markdown(
+                    f'<h2 style="text-align:center; color:{NAVY};">Hi, {ask_user}</h2>'
+                    f'<p style="text-align:center; color:#64748B;">What would you like to know about the supply chain?</p>',
+                    unsafe_allow_html=True,
+                )
 
-            col_new, col_spacer = st.columns([1, 3])
-            with col_new:
-                if st.button("+ New Chat", type="primary", use_container_width=True):
+                # Suggested prompts
+                SUGGESTIONS = [
+                    "What was our on-time delivery rate last quarter?",
+                    "Show fill rate by carrier",
+                    "Which customers have the lowest OTD?",
+                    "What is our landed cost per unit for Q3?",
+                ]
+                sg_cols = st.columns(2)
+                for idx, sug in enumerate(SUGGESTIONS):
+                    with sg_cols[idx % 2]:
+                        if st.button(sug, key=f"sug_{idx}", use_container_width=True):
+                            st.session_state["_ask_ready"] = True
+                            st.session_state["_prefill_question"] = sug
+                            st.rerun()
+
+                st.markdown("")
+                if st.button("+ Start a new chat", type="primary", use_container_width=True):
                     st.session_state.chat_history = []
                     st.session_state.active_session_id = str(uuid.uuid4())
                     st.session_state.session_title = "New Chat"
                     st.session_state["_ask_ready"] = True
                     st.rerun()
 
-            # Show past sessions
+            # Past sessions below
             try:
                 df_past = list_sessions(conn, ask_user)
             except Exception:
                 df_past = pd.DataFrame()
 
             if not df_past.empty:
-                st.markdown("**Your previous sessions** — click to resume:")
+                st.markdown("")
+                st.markdown("**Recent conversations**")
                 for _, srow in df_past.iterrows():
                     sid = srow["SESSION_ID"]
                     title = srow["TITLE"] or "Untitled"
-                    updated = srow["UPDATED_AT"]
-                    col_resume, col_del = st.columns([6, 1])
+                    col_resume, col_del = st.columns([8, 1])
                     with col_resume:
                         if st.button(f"{title}", key=f"ask_load_{sid}", use_container_width=True):
                             data = load_session(conn, sid)
@@ -726,20 +780,15 @@ with tab_ask:
                         if st.button("X", key=f"ask_del_{sid}"):
                             delete_session(conn, sid)
                             st.rerun()
-            else:
-                st.caption("No previous sessions. Click **+ New Chat** to start!")
 
         # ── Active chat session ──
         else:
-            # Persona selector
-            col_persona, col_title, col_actions = st.columns([1, 2, 2])
-            with col_persona:
-                persona = st.selectbox("Persona", list(ROLES.keys()))
-            role_name = ROLES[persona]
-            use_role(conn, role_name)
-            with col_title:
-                st.caption(f"Session: **{st.session_state.session_title}**")
-                st.caption(f"Role: `{role_name}`")
+            # Minimal top bar
+            col_role, col_spacer, col_actions = st.columns([2, 3, 2])
+            with col_role:
+                persona = st.selectbox("Persona", list(ROLES.keys()), label_visibility="collapsed")
+                role_name = ROLES[persona]
+                use_role(conn, role_name)
             with col_actions:
                 ac1, ac2, ac3 = st.columns(3)
                 with ac1:
@@ -752,7 +801,7 @@ with tab_ask:
                             st.session_state.chat_history,
                             is_shared=True,
                         )
-                        st.success(f"Link: `?session={st.session_state.active_session_id}`")
+                        st.toast(f"Shared! Link: ?session={st.session_state.active_session_id}")
                 with ac2:
                     if st.button("New"):
                         st.session_state.chat_history = []
@@ -788,7 +837,11 @@ with tab_ask:
                                 st.caption(f"Period: {extract_period(turn['sql'])}")
 
             # Chat input
-            question = st.chat_input("Ask about the supply chain...")
+            question = st.chat_input("Message OneTruth...")
+
+            # Handle prefilled question from suggestion buttons
+            if not question and st.session_state.get("_prefill_question"):
+                question = st.session_state.pop("_prefill_question")
 
             if question:
                 st.session_state.chat_history.append({
@@ -799,7 +852,6 @@ with tab_ask:
                 with st.chat_message("user"):
                     st.markdown(question)
 
-                # Auto-title from first question
                 if st.session_state.session_title == "New Chat":
                     st.session_state.session_title = question[:60] + ("..." if len(question) > 60 else "")
 
