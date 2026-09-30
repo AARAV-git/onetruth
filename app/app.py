@@ -7,6 +7,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 import snowflake.connector
 from snowflake.connector.errors import ProgrammingError, DatabaseError
 
@@ -88,13 +89,11 @@ def get_connection():
 
 
 def _reconnect():
-    """Clear the cached connection and create a fresh one."""
     get_connection.clear()
     return get_connection()
 
 
 def _with_reconnect(fn):
-    """Run fn(conn); on auth failure, reconnect once and retry with new conn."""
     conn = get_connection()
     try:
         return fn(conn)
@@ -144,9 +143,9 @@ def load_metric_metadata():
     return metrics
 
 # ---------------------------------------------------------------------------
-# Cortex Analyst REST call
+# Cortex Analyst REST call (multi-turn)
 # ---------------------------------------------------------------------------
-def call_analyst(conn, question):
+def call_analyst(conn, messages):
     def _do(c):
         token = c.rest.token
         host = c.host
@@ -156,9 +155,7 @@ def call_analyst(conn, question):
             "Content-Type": "application/json",
         }
         body = {
-            "messages": [
-                {"role": "user", "content": [{"type": "text", "text": question}]}
-            ],
+            "messages": messages,
             "semantic_view": SEMANTIC_VIEW,
         }
         resp = requests.post(url, headers=headers, json=body, timeout=120)
@@ -168,7 +165,6 @@ def call_analyst(conn, question):
 
 
 def parse_analyst_response(resp):
-    """Extract text, sql, and suggestions from the Analyst response."""
     msg = resp.get("message", {})
     contents = msg.get("content", [])
     text_parts, sql_stmt, suggestions = [], None, []
@@ -184,7 +180,6 @@ def parse_analyst_response(resp):
 
 
 def extract_period(sql_text):
-    """Try to extract date range from generated SQL."""
     if not sql_text:
         return "Not specified"
     dates = re.findall(r"'(\d{4}-\d{2}-\d{2})'", sql_text)
@@ -199,7 +194,6 @@ def extract_period(sql_text):
 
 
 def find_metric_in_sql(sql_text, metrics_meta):
-    """Match metric names from SQL to metadata."""
     if not sql_text:
         return []
     found = []
@@ -210,19 +204,228 @@ def find_metric_in_sql(sql_text, metrics_meta):
     return found
 
 # ---------------------------------------------------------------------------
-# UI
+# Auto-chart: detect shape and render the best visualization
+# ---------------------------------------------------------------------------
+TIME_PATTERNS = re.compile(
+    r"(DATE|MONTH|QUARTER|YEAR|WEEK|PERIOD|TIME)", re.IGNORECASE
+)
+
+def auto_visualize(result_df, container):
+    if result_df.empty:
+        container.warning("Query returned no rows.")
+        return
+
+    nrows, ncols = result_df.shape
+
+    # Single scalar
+    if nrows == 1 and ncols == 1:
+        val = result_df.iloc[0, 0]
+        col_name = result_df.columns[0]
+        if isinstance(val, (int, float)) and abs(val) <= 1:
+            container.metric(col_name.replace("_", " ").title(), f"{val * 100:.1f}%")
+        else:
+            container.metric(
+                col_name.replace("_", " ").title(),
+                f"{val:,.2f}" if isinstance(val, float) else str(val),
+            )
+        return
+
+    # Single row, multiple columns — metric cards
+    if nrows == 1:
+        cols = container.columns(min(ncols, 4))
+        for i, c in enumerate(result_df.columns):
+            val = result_df.iloc[0, i]
+            label = c.replace("_", " ").title()
+            with cols[i % len(cols)]:
+                if isinstance(val, (int, float)) and abs(val) <= 1 and "RATE" in c.upper():
+                    st.metric(label, f"{val * 100:.1f}%")
+                elif isinstance(val, float):
+                    st.metric(label, f"{val:,.2f}")
+                else:
+                    st.metric(label, str(val))
+        return
+
+    # Multi-row: identify text/time and numeric columns
+    str_cols = [c for c in result_df.columns if result_df[c].dtype == "object"]
+    num_cols = [c for c in result_df.columns if pd.api.types.is_numeric_dtype(result_df[c])]
+    time_cols = [c for c in str_cols if TIME_PATTERNS.search(c)]
+
+    # Time-series line chart
+    if time_cols and num_cols:
+        x_col = time_cols[0]
+        df_sorted = result_df.sort_values(x_col)
+        fig = px.line(
+            df_sorted, x=x_col, y=num_cols,
+            markers=True, template="plotly_white",
+        )
+        fig.update_layout(height=420, xaxis_title=None)
+        container.plotly_chart(fig, use_container_width=True)
+        with container.expander("Data table"):
+            st.dataframe(df_sorted, use_container_width=True)
+        return
+
+    # Categorical bar chart
+    if str_cols and num_cols and nrows <= 50:
+        x_col = str_cols[0]
+        fig = px.bar(
+            result_df, x=x_col, y=num_cols,
+            barmode="group", template="plotly_white",
+            text_auto=".2s",
+        )
+        fig.update_layout(height=420, xaxis_title=None)
+        container.plotly_chart(fig, use_container_width=True)
+        with container.expander("Data table"):
+            st.dataframe(result_df, use_container_width=True)
+        return
+
+    # Fallback: plain table
+    container.dataframe(result_df, use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# Page config & sidebar
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="OneTruth Supply Chain", layout="wide")
-st.title("OneTruth Supply Chain")
+
+with st.sidebar:
+    st.title("OneTruth")
+    st.caption("Governed Supply Chain Analytics")
+    st.divider()
+    try:
+        conn = get_connection()
+        st.success("Connected to Snowflake", icon="*")
+    except Exception:
+        conn = None
+        st.error("Disconnected", icon="*")
+    st.divider()
+    st.markdown(
+        "**Governed Metrics**\n"
+        "- ON_TIME_DELIVERY_RATE\n"
+        "- FILL_RATE\n"
+        "- DAYS_OF_INVENTORY\n"
+        "- LANDED_COST_PER_UNIT"
+    )
 
 conn = get_connection()
 metrics_meta = load_metric_metadata()
 
-tab_ask, tab_before, tab_consistency = st.tabs(
-    ["Ask", "Before OneTruth", "Consistency"]
+# ---------------------------------------------------------------------------
+# Tabs
+# ---------------------------------------------------------------------------
+tab_dash, tab_ask, tab_before, tab_consistency, tab_masking = st.tabs(
+    ["Dashboard", "Ask", "Before OneTruth", "Consistency", "Masking"]
 )
 
-# ── Tab 1: Ask ─────────────────────────────────────────────────────────────
+# ── Tab 1: Executive Dashboard ────────────────────────────────────────────
+with tab_dash:
+    st.subheader("Executive KPI Dashboard — Q3 2026")
+    use_role(conn, "ACCOUNTADMIN")
+
+    # 4 metric cards
+    kpi_query = """
+    SELECT * FROM SEMANTIC_VIEW(
+        ONETRUTH.SEMANTIC.SUPPLY_CHAIN_SV
+        DIMENSIONS order_lines.promised_quarter
+        METRICS order_lines.ON_TIME_DELIVERY_RATE,
+               order_lines.FILL_RATE,
+               order_lines.LANDED_COST_PER_UNIT
+    )
+    WHERE promised_quarter = '2026-Q3'
+    """
+    try:
+        df_kpi = run_query(conn, kpi_query)
+        c1, c2, c3, c4 = st.columns(4)
+        if not df_kpi.empty:
+            row = df_kpi.iloc[0]
+            otd = row.get("ON_TIME_DELIVERY_RATE")
+            fill = row.get("FILL_RATE")
+            landed = row.get("LANDED_COST_PER_UNIT")
+
+            c1.metric("On-Time Delivery", f"{otd * 100:.1f}%" if otd else "N/A")
+            c2.metric("Fill Rate", f"{fill * 100:.1f}%" if fill else "N/A")
+            c3.metric("Landed Cost/Unit", f"${landed:,.2f}" if landed else "N/A")
+
+            # Days of inventory — separate query (non-additive by snapshot_date)
+            doi_query = """
+            SELECT * FROM SEMANTIC_VIEW(
+                ONETRUTH.SEMANTIC.SUPPLY_CHAIN_SV
+                DIMENSIONS inventory.snapshot_date
+                METRICS inventory.DAYS_OF_INVENTORY
+            )
+            ORDER BY snapshot_date DESC LIMIT 1
+            """
+            try:
+                df_doi = run_query(conn, doi_query)
+                doi = df_doi.iloc[0]["DAYS_OF_INVENTORY"] if not df_doi.empty else None
+                c4.metric("Days of Inventory", f"{doi:.1f}" if doi else "N/A")
+            except Exception:
+                c4.metric("Days of Inventory", "N/A")
+    except Exception as e:
+        st.warning(f"Could not load KPIs: {e}")
+
+    st.divider()
+
+    # Monthly OTD + Fill Rate trend
+    trend_query = """
+    SELECT * FROM SEMANTIC_VIEW(
+        ONETRUTH.SEMANTIC.SUPPLY_CHAIN_SV
+        DIMENSIONS order_lines.promised_month
+        METRICS order_lines.ON_TIME_DELIVERY_RATE, order_lines.FILL_RATE
+    )
+    ORDER BY promised_month
+    """
+    try:
+        df_trend = run_query(conn, trend_query)
+        if not df_trend.empty:
+            col_left, col_right = st.columns(2)
+            with col_left:
+                st.markdown("**Monthly Delivery Performance**")
+                df_plot = df_trend.melt(
+                    id_vars=["PROMISED_MONTH"],
+                    value_vars=["ON_TIME_DELIVERY_RATE", "FILL_RATE"],
+                    var_name="Metric", value_name="Rate",
+                )
+                df_plot["Rate"] = df_plot["Rate"].astype(float) * 100
+                fig_trend = px.line(
+                    df_plot, x="PROMISED_MONTH", y="Rate", color="Metric",
+                    markers=True, template="plotly_white",
+                    labels={"PROMISED_MONTH": "Month", "Rate": "%"},
+                )
+                fig_trend.update_layout(height=350, legend=dict(orientation="h", y=-0.2))
+                st.plotly_chart(fig_trend, use_container_width=True)
+
+            with col_right:
+                st.markdown("**Top 10 Customers by Order Volume**")
+                top_cust_query = """
+                SELECT * FROM SEMANTIC_VIEW(
+                    ONETRUTH.SEMANTIC.SUPPLY_CHAIN_SV
+                    DIMENSIONS customers.customer_name
+                    METRICS order_lines.ON_TIME_DELIVERY_RATE
+                )
+                ORDER BY ON_TIME_DELIVERY_RATE ASC
+                LIMIT 10
+                """
+                try:
+                    df_cust = run_query(conn, top_cust_query)
+                    if not df_cust.empty:
+                        df_cust["OTD %"] = (df_cust["ON_TIME_DELIVERY_RATE"].astype(float) * 100).round(1)
+                        fig_cust = px.bar(
+                            df_cust.sort_values("OTD %"),
+                            x="OTD %", y="CUSTOMER_NAME",
+                            orientation="h", template="plotly_white",
+                            color="OTD %",
+                            color_continuous_scale=["#EF553B", "#FFA15A", "#00CC96"],
+                        )
+                        fig_cust.update_layout(
+                            height=350, yaxis_title=None, showlegend=False,
+                            coloraxis_showscale=False,
+                        )
+                        st.plotly_chart(fig_cust, use_container_width=True)
+                except Exception:
+                    st.info("Could not load customer data.")
+    except Exception as e:
+        st.warning(f"Could not load trend: {e}")
+
+# ── Tab 2: Ask (multi-turn chat) ─────────────────────────────────────────
 with tab_ask:
     col_persona, col_spacer = st.columns([1, 3])
     with col_persona:
@@ -231,85 +434,120 @@ with tab_ask:
     use_role(conn, role_name)
     st.caption(f"Active role: `{role_name}`")
 
-    question = st.text_input(
-        "Ask a question about the supply chain",
-        placeholder="e.g. What was our on-time delivery last quarter?",
-    )
+    # Session state for chat history
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    if st.button("Clear chat", type="secondary"):
+        st.session_state.chat_history = []
+        st.rerun()
+
+    # Render previous messages
+    for turn in st.session_state.chat_history:
+        with st.chat_message(turn["role"]):
+            if turn["role"] == "user":
+                st.markdown(turn["display"])
+            else:
+                st.markdown(turn["display"], unsafe_allow_html=True)
+                if turn.get("df") is not None:
+                    auto_visualize(turn["df"], st)
+                if turn.get("sql"):
+                    with st.expander("Evidence"):
+                        st.code(turn["sql"], language="sql")
+                        matched = find_metric_in_sql(turn["sql"], metrics_meta)
+                        if matched:
+                            for name, meta in matched:
+                                st.markdown(f"**{name}**: {meta['comment']}")
+                        st.caption(f"Period: {extract_period(turn['sql'])}")
+
+    # Chat input
+    question = st.chat_input("Ask about the supply chain...")
 
     if question:
-        with st.spinner("Asking Cortex Analyst..."):
-            try:
-                resp = call_analyst(conn, question)
-                text, sql_stmt, suggestions = parse_analyst_response(resp)
-            except Exception as e:
-                st.error(f"Analyst call failed: {e}")
-                text, sql_stmt, suggestions = str(e), None, []
+        # Add user message
+        st.session_state.chat_history.append({
+            "role": "user",
+            "display": question,
+            "content": [{"type": "text", "text": question}],
+        })
+        with st.chat_message("user"):
+            st.markdown(question)
 
-        # -- Answer card --
-        if sql_stmt:
-            try:
-                result_df = run_query(conn, sql_stmt)
-                if result_df.shape == (1, 1):
-                    val = result_df.iloc[0, 0]
-                    col_name = result_df.columns[0]
-                    if isinstance(val, (int, float)) and abs(val) <= 1:
-                        st.metric(col_name, f"{val * 100:.1f}%")
-                    else:
-                        st.metric(col_name, f"{val:,.2f}" if isinstance(val, float) else str(val))
-                elif result_df.shape[0] == 1:
-                    cols = st.columns(len(result_df.columns))
-                    for i, c in enumerate(result_df.columns):
-                        val = result_df.iloc[0, i]
-                        label = c.replace("_", " ").title()
-                        if isinstance(val, (int, float)) and abs(val) <= 1 and "RATE" in c.upper():
-                            cols[i].metric(label, f"{val * 100:.1f}%")
-                        elif isinstance(val, float):
-                            cols[i].metric(label, f"{val:,.2f}")
-                        else:
-                            cols[i].metric(label, str(val))
-                else:
-                    st.dataframe(result_df, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Could not execute generated SQL: {e}")
-
-        if text:
-            is_refusal = any(
-                kw in text.lower()
-                for kw in ["not defined", "not allowed", "cannot", "can't answer"]
-            )
-            if is_refusal:
-                st.warning(text)
-            elif not sql_stmt:
-                st.info(text)
-
-        if suggestions:
-            st.info("Cortex Analyst suggested these clarifications:")
-            for s in suggestions:
-                st.write(f"- {s}")
-
-        # -- Evidence panel --
-        with st.expander("Evidence", expanded=False):
-            st.subheader("Generated SQL")
-            if sql_stmt:
-                st.code(sql_stmt, language="sql")
+        # Build multi-turn message list for Cortex Analyst
+        analyst_messages = []
+        for turn in st.session_state.chat_history:
+            if turn["role"] == "user":
+                analyst_messages.append({
+                    "role": "user",
+                    "content": turn["content"],
+                })
             else:
-                st.write("No SQL generated (question was refused or clarified).")
+                analyst_messages.append({
+                    "role": "analyst",
+                    "content": turn["content"],
+                })
 
-            st.subheader("Metric definition")
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    resp = call_analyst(conn, analyst_messages)
+                    text, sql_stmt, suggestions = parse_analyst_response(resp)
+                except Exception as e:
+                    text, sql_stmt, suggestions = f"Analyst call failed: {e}", None, []
+
+            result_df = None
+            display_parts = []
+
+            if text:
+                is_refusal = any(
+                    kw in text.lower()
+                    for kw in ["not defined", "not allowed", "cannot", "can't answer"]
+                )
+                if is_refusal:
+                    st.warning(text)
+                    display_parts.append(text)
+                elif not sql_stmt:
+                    st.info(text)
+                    display_parts.append(text)
+
             if sql_stmt:
-                matched = find_metric_in_sql(sql_stmt, metrics_meta)
-                if matched:
-                    for name, meta in matched:
-                        st.markdown(f"**{name}**: {meta['comment']}")
-                else:
-                    st.write("No governed metric matched in the SQL.")
-            else:
-                st.write("—")
+                try:
+                    result_df = run_query(conn, sql_stmt)
+                    auto_visualize(result_df, st)
+                except Exception as e:
+                    st.warning(f"Could not execute SQL: {e}")
 
-            st.subheader("Period covered")
-            st.write(extract_period(sql_stmt))
+                with st.expander("Evidence"):
+                    st.code(sql_stmt, language="sql")
+                    matched = find_metric_in_sql(sql_stmt, metrics_meta)
+                    if matched:
+                        for name, meta in matched:
+                            st.markdown(f"**{name}**: {meta['comment']}")
+                    st.caption(f"Period: {extract_period(sql_stmt)}")
 
-# ── Tab 2: Before OneTruth ─────────────────────────────────────────────────
+            if suggestions:
+                st.info("Suggested follow-ups:")
+                for s in suggestions:
+                    st.write(f"- {s}")
+
+            # Build the response content for Analyst multi-turn
+            response_content = []
+            if text:
+                response_content.append({"type": "text", "text": text})
+            if sql_stmt:
+                response_content.append({"type": "sql", "statement": sql_stmt})
+            if suggestions:
+                response_content.append({"type": "suggestion", "suggestions": suggestions})
+
+            st.session_state.chat_history.append({
+                "role": "analyst",
+                "display": text or "",
+                "content": response_content,
+                "sql": sql_stmt,
+                "df": result_df,
+            })
+
+# ── Tab 3: Before OneTruth ───────────────────────────────────────────────
 with tab_before:
     st.subheader("Q3 2026 On-Time Delivery — Four teams, four numbers")
     use_role(conn, "ACCOUNTADMIN")
@@ -349,7 +587,7 @@ with tab_before:
     else:
         st.warning("No data returned from PERSONA_BEFORE_ONETRUTH.")
 
-# ── Tab 3: Consistency ─────────────────────────────────────────────────────
+# ── Tab 4: Consistency ───────────────────────────────────────────────────
 with tab_consistency:
     st.subheader("Same metric, every role — governance in action")
     st.write(
@@ -383,5 +621,88 @@ with tab_consistency:
     else:
         st.error("Mismatch detected — check role privileges and masking policies.")
 
-    # Reset to ACCOUNTADMIN
+    use_role(conn, "ACCOUNTADMIN")
+
+# ── Tab 5: Masking Demo ─────────────────────────────────────────────────
+with tab_masking:
+    st.subheader("Column-Level Masking — Governance you can see")
+    st.write(
+        "The same `LANDED_COST_PER_UNIT` metric queried under each role. "
+        "Logistics sees **NULL** because cost columns are masked."
+    )
+
+    cost_query = """
+    SELECT * FROM SEMANTIC_VIEW(
+        ONETRUTH.SEMANTIC.SUPPLY_CHAIN_SV
+        DIMENSIONS order_lines.promised_quarter
+        METRICS order_lines.LANDED_COST_PER_UNIT
+    )
+    WHERE promised_quarter = '2026-Q3'
+    """
+
+    mask_results = {}
+    for label, role in ROLES.items():
+        try:
+            use_role(conn, role)
+            df = run_query(conn, cost_query)
+            val = df.iloc[0]["LANDED_COST_PER_UNIT"] if not df.empty else None
+            if val is not None and pd.notna(val):
+                mask_results[label] = {"value": float(val), "masked": False}
+            else:
+                mask_results[label] = {"value": None, "masked": True}
+        except Exception as e:
+            mask_results[label] = {"value": None, "masked": True, "error": str(e)}
+
+    cols = st.columns(3)
+    for i, (label, info) in enumerate(mask_results.items()):
+        with cols[i]:
+            if info["masked"]:
+                st.metric(f"{label}", "NULL")
+                st.error("MASKED — cost columns hidden by policy")
+            else:
+                st.metric(f"{label}", f"${info['value']:,.2f}")
+                st.success("Full access to cost data")
+
+    st.divider()
+
+    # Raw column comparison
+    st.markdown("**Raw cost column visibility by role**")
+    raw_cost_query = """
+    SELECT
+        ROUND(AVG(unit_price), 2) AS avg_unit_price,
+        ROUND(AVG(freight_cost), 2) AS avg_freight_cost,
+        ROUND(AVG(duty_cost), 2) AS avg_duty_cost,
+        ROUND(AVG(handling_cost), 2) AS avg_handling_cost
+    FROM ONETRUTH.RAW.ORDER_LINES_V
+    """
+
+    raw_data = []
+    for label, role in ROLES.items():
+        try:
+            use_role(conn, role)
+            df = run_query(conn, raw_cost_query)
+            row = df.iloc[0].to_dict() if not df.empty else {}
+            row["Role"] = label
+            raw_data.append(row)
+        except Exception:
+            raw_data.append({"Role": label})
+
+    if raw_data:
+        df_raw = pd.DataFrame(raw_data)
+        col_order = ["Role"] + [c for c in df_raw.columns if c != "Role"]
+        df_display = df_raw[col_order].copy()
+        for c in df_display.columns:
+            if c != "Role":
+                df_display[c] = df_display[c].apply(
+                    lambda v: f"${v:,.2f}" if pd.notna(v) else "NULL (masked)"
+                )
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+    st.caption(
+        "The masking policy `MASK_COST_FROM_LOGISTICS` returns NULL for "
+        "`unit_price`, `freight_cost`, `duty_cost`, and `handling_cost` "
+        "when `CURRENT_ROLE() = 'LOGISTICS_ROLE'`. This propagates through "
+        "views into the semantic view."
+    )
+
     use_role(conn, "ACCOUNTADMIN")
