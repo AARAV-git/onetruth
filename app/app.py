@@ -485,60 +485,43 @@ with st.sidebar:
     )
     st.divider()
 
-    # User identity
-    user_name = st.text_input("Your name", value="", placeholder="Enter your name")
-    if user_name:
-        st.session_state["user_name"] = user_name
-    else:
-        user_name = st.session_state.get("user_name", "")
-
-    if user_name:
+    sidebar_user = st.session_state.get("user_name", "")
+    if sidebar_user:
+        st.markdown(f"Logged in as **{sidebar_user}**")
+        if st.button("Log out", use_container_width=True):
+            st.session_state["user_name"] = ""
+            st.session_state.chat_history = []
+            st.session_state.session_title = "New Chat"
+            st.session_state.active_session_id = str(uuid.uuid4())
+            st.rerun()
         st.divider()
 
-        # New chat button
-        if st.button("+ New Chat", use_container_width=True, type="primary"):
-            st.session_state.chat_history = []
-            st.session_state.active_session_id = str(uuid.uuid4())
-            st.session_state.session_title = "New Chat"
-            st.session_state.readonly_mode = False
-            st.session_state.shared_owner = None
-            st.query_params.clear()
-            st.rerun()
-
-        # Past sessions
-        st.markdown("**Chat History**")
+        # Quick session list in sidebar
+        st.markdown("**Recent Chats**")
         try:
-            df_sessions = list_sessions(conn, user_name)
-            if not df_sessions.empty:
-                for _, srow in df_sessions.iterrows():
+            df_sidebar = list_sessions(conn, sidebar_user)
+            if not df_sidebar.empty:
+                for _, srow in df_sidebar.head(10).iterrows():
                     sid = srow["SESSION_ID"]
                     title = srow["TITLE"] or "Untitled"
                     is_active = sid == st.session_state.active_session_id
-                    col_btn, col_del = st.columns([5, 1])
-                    with col_btn:
-                        label = f"{'> ' if is_active else ''}{title}"
-                        if st.button(label, key=f"load_{sid}", use_container_width=True):
-                            data = load_session(conn, sid)
-                            if data:
-                                st.session_state.chat_history = data["messages"]
-                                st.session_state.active_session_id = sid
-                                st.session_state.session_title = data["title"]
-                                st.session_state.readonly_mode = False
-                                st.session_state.shared_owner = None
-                                st.query_params.clear()
-                                st.rerun()
-                    with col_del:
-                        if st.button("X", key=f"del_{sid}"):
-                            delete_session(conn, sid)
-                            if sid == st.session_state.active_session_id:
-                                st.session_state.chat_history = []
-                                st.session_state.active_session_id = str(uuid.uuid4())
-                                st.session_state.session_title = "New Chat"
+                    prefix = "> " if is_active else ""
+                    if st.button(f"{prefix}{title}", key=f"sb_{sid}", use_container_width=True):
+                        data = load_session(conn, sid)
+                        if data:
+                            st.session_state.chat_history = data["messages"]
+                            st.session_state.active_session_id = sid
+                            st.session_state.session_title = data["title"]
+                            st.session_state.readonly_mode = False
+                            st.session_state.shared_owner = None
+                            st.query_params.clear()
                             st.rerun()
             else:
-                st.caption("No saved chats yet.")
+                st.caption("No chats yet.")
         except Exception:
-            st.caption("No saved chats yet.")
+            st.caption("No chats yet.")
+    else:
+        st.caption("Go to the **Ask** tab to sign in.")
 
     st.divider()
     st.markdown(
@@ -668,199 +651,271 @@ with tab_dash:
 
 # ── Tab 2: Ask (multi-turn chat with persistence) ────────────────────────
 with tab_ask:
-    # Shared-session banner
+    # Shared-session read-only view (via ?session= URL)
     if st.session_state.readonly_mode:
         st.info(
             f"Viewing shared conversation by **{st.session_state.shared_owner}**. "
             "This is read-only."
         )
-    else:
-        col_persona, col_spacer = st.columns([1, 3])
-        with col_persona:
-            persona = st.selectbox("Persona", list(ROLES.keys()))
-        role_name = ROLES[persona]
-        use_role(conn, role_name)
-        st.caption(f"Active role: `{role_name}`")
-
-    # Share button row
-    if not st.session_state.readonly_mode and st.session_state.chat_history:
-        user_name = st.session_state.get("user_name", "")
-        col_share, col_clear = st.columns(2)
-        with col_share:
-            if st.button("Share this chat"):
-                if user_name:
-                    save_session(
-                        conn,
-                        st.session_state.active_session_id,
-                        user_name,
-                        st.session_state.session_title,
-                        st.session_state.chat_history,
-                        is_shared=True,
-                    )
-                    share_url = f"?session={st.session_state.active_session_id}"
-                    st.success(f"Shared! Send this link: `{share_url}`")
-                else:
-                    st.warning("Enter your name in the sidebar first.")
-        with col_clear:
-            if st.button("Clear chat"):
-                st.session_state.chat_history = []
-                st.session_state.active_session_id = str(uuid.uuid4())
-                st.session_state.session_title = "New Chat"
-                st.query_params.clear()
-                st.rerun()
-
-    # Render previous messages
-    for turn in st.session_state.chat_history:
-        with st.chat_message(turn["role"]):
-            if turn["role"] == "user":
-                st.markdown(turn["display"])
-            else:
-                st.markdown(turn["display"], unsafe_allow_html=True)
-                if turn.get("df") is not None:
-                    auto_visualize(turn["df"], st)
-                if turn.get("sql"):
-                    with st.expander("Evidence"):
-                        st.code(turn["sql"], language="sql")
-                        matched = find_metric_in_sql(turn["sql"], metrics_meta)
-                        if matched:
-                            for name, meta in matched:
-                                st.markdown(f"**{name}**: {meta['comment']}")
-                        st.caption(f"Period: {extract_period(turn['sql'])}")
-
-    # Chat input (hidden in read-only mode)
-    if not st.session_state.readonly_mode:
-        question = st.chat_input("Ask about the supply chain...")
-    else:
-        question = None
-
-    if question:
-        st.session_state.chat_history.append({
-            "role": "user",
-            "display": question,
-            "content": [{"type": "text", "text": question}],
-        })
-        with st.chat_message("user"):
-            st.markdown(question)
-
-        # Auto-title from first question
-        if st.session_state.session_title == "New Chat":
-            st.session_state.session_title = question[:60] + ("..." if len(question) > 60 else "")
-
-        # Local answers for non-data questions
-        q_lower = question.lower()
-        about_keywords = ["who built", "who made", "who created", "who developed",
-                          "who designed", "built this", "made this", "your team",
-                          "your creator", "about you", "who are you", "team member",
-                          "team lead", "main developer", "main in", "neuroforge",
-                          "sunny pathak", "saurav sharma", "himanshi sharma",
-                          "behind this", "developed by", "created by", "made by",
-                          "built by", "building you", "build you", "your developer",
-                          "your builder", "who is behind", "who works on"]
-        is_about = any(kw in q_lower for kw in about_keywords)
-
-        if is_about:
-            team_text = (
-                "This app was built by **Team NeuroForge**.\n\n"
-                "| Role | Name |\n"
-                "|:-----|:-----|\n"
-                "| **Team Leader & Architect** | Sunny Pathak |\n"
-                "| **Member** | Saurav Sharma |\n"
-                "| **Member** | Himanshi Sharma |\n\n"
-                "**Sunny Pathak** leads the team and is the primary architect behind "
-                "OneTruth — from the semantic view design and RBAC model to the "
-                "Cortex Analyst integration and this Streamlit app.\n\n"
-                "OneTruth demonstrates governed supply chain analytics "
-                "powered by Snowflake Semantic Views and Cortex Analyst."
-            )
-            with st.chat_message("assistant"):
-                st.markdown(team_text)
-            st.session_state.chat_history.append({
-                "role": "analyst",
-                "display": team_text,
-                "content": [{"type": "text", "text": team_text}],
-                "sql": None,
-                "df": None,
-            })
-        else:
-            analyst_messages = []
-            for turn in st.session_state.chat_history:
+        for turn in st.session_state.chat_history:
+            with st.chat_message(turn["role"]):
                 if turn["role"] == "user":
-                    analyst_messages.append({
-                        "role": "user",
-                        "content": turn["content"],
+                    st.markdown(turn["display"])
+                else:
+                    st.markdown(turn["display"], unsafe_allow_html=True)
+                    if turn.get("df") is not None:
+                        auto_visualize(turn["df"], st)
+                    if turn.get("sql"):
+                        with st.expander("Evidence"):
+                            st.code(turn["sql"], language="sql")
+
+    # ── Gate: must enter name first ──
+    elif not st.session_state.get("user_name"):
+        st.markdown("### Welcome to OneTruth Chat")
+        st.write("Enter your name to start asking questions or resume a previous session.")
+        with st.form("name_gate", clear_on_submit=False):
+            name_input = st.text_input("Your name", placeholder="e.g. Sunny Pathak")
+            submitted = st.form_submit_button("Continue", type="primary")
+        if submitted and name_input.strip():
+            st.session_state["user_name"] = name_input.strip()
+            st.rerun()
+        elif submitted:
+            st.warning("Please enter your name.")
+
+    # ── Logged in: show session picker or active chat ──
+    else:
+        ask_user = st.session_state["user_name"]
+
+        # If no active chat is loaded, show the session picker
+        if not st.session_state.chat_history and st.session_state.session_title == "New Chat":
+            st.markdown(f"### Welcome back, {ask_user}")
+
+            col_new, col_spacer = st.columns([1, 3])
+            with col_new:
+                if st.button("+ New Chat", type="primary", use_container_width=True):
+                    st.session_state.chat_history = []
+                    st.session_state.active_session_id = str(uuid.uuid4())
+                    st.session_state.session_title = "New Chat"
+                    st.session_state["_ask_ready"] = True
+                    st.rerun()
+
+            # Show past sessions
+            try:
+                df_past = list_sessions(conn, ask_user)
+            except Exception:
+                df_past = pd.DataFrame()
+
+            if not df_past.empty:
+                st.markdown("**Your previous sessions** — click to resume:")
+                for _, srow in df_past.iterrows():
+                    sid = srow["SESSION_ID"]
+                    title = srow["TITLE"] or "Untitled"
+                    updated = srow["UPDATED_AT"]
+                    col_resume, col_del = st.columns([6, 1])
+                    with col_resume:
+                        if st.button(f"{title}", key=f"ask_load_{sid}", use_container_width=True):
+                            data = load_session(conn, sid)
+                            if data:
+                                st.session_state.chat_history = data["messages"]
+                                st.session_state.active_session_id = sid
+                                st.session_state.session_title = data["title"]
+                                st.session_state["_ask_ready"] = True
+                                st.query_params.clear()
+                                st.rerun()
+                    with col_del:
+                        if st.button("X", key=f"ask_del_{sid}"):
+                            delete_session(conn, sid)
+                            st.rerun()
+            else:
+                st.caption("No previous sessions. Click **+ New Chat** to start!")
+
+        # ── Active chat session ──
+        else:
+            # Persona selector
+            col_persona, col_title, col_actions = st.columns([1, 2, 2])
+            with col_persona:
+                persona = st.selectbox("Persona", list(ROLES.keys()))
+            role_name = ROLES[persona]
+            use_role(conn, role_name)
+            with col_title:
+                st.caption(f"Session: **{st.session_state.session_title}**")
+                st.caption(f"Role: `{role_name}`")
+            with col_actions:
+                ac1, ac2, ac3 = st.columns(3)
+                with ac1:
+                    if st.button("Share"):
+                        save_session(
+                            conn,
+                            st.session_state.active_session_id,
+                            ask_user,
+                            st.session_state.session_title,
+                            st.session_state.chat_history,
+                            is_shared=True,
+                        )
+                        st.success(f"Link: `?session={st.session_state.active_session_id}`")
+                with ac2:
+                    if st.button("New"):
+                        st.session_state.chat_history = []
+                        st.session_state.active_session_id = str(uuid.uuid4())
+                        st.session_state.session_title = "New Chat"
+                        st.query_params.clear()
+                        st.rerun()
+                with ac3:
+                    if st.button("Back"):
+                        st.session_state.chat_history = []
+                        st.session_state.session_title = "New Chat"
+                        st.query_params.clear()
+                        st.rerun()
+
+            # Render previous messages
+            for turn in st.session_state.chat_history:
+                with st.chat_message(turn["role"]):
+                    if turn["role"] == "user":
+                        st.markdown(turn["display"])
+                    else:
+                        st.markdown(turn["display"], unsafe_allow_html=True)
+                        if turn.get("df") is not None:
+                            auto_visualize(turn["df"], st)
+                        if turn.get("sql"):
+                            with st.expander("Evidence"):
+                                st.code(turn["sql"], language="sql")
+                                matched = find_metric_in_sql(turn["sql"], metrics_meta)
+                                if matched:
+                                    for name, meta in matched:
+                                        st.markdown(f"**{name}**: {meta['comment']}")
+                                st.caption(f"Period: {extract_period(turn['sql'])}")
+
+            # Chat input
+            question = st.chat_input("Ask about the supply chain...")
+
+            if question:
+                st.session_state.chat_history.append({
+                    "role": "user",
+                    "display": question,
+                    "content": [{"type": "text", "text": question}],
+                })
+                with st.chat_message("user"):
+                    st.markdown(question)
+
+                # Auto-title from first question
+                if st.session_state.session_title == "New Chat":
+                    st.session_state.session_title = question[:60] + ("..." if len(question) > 60 else "")
+
+                # Local answers for non-data questions
+                q_lower = question.lower()
+                about_keywords = [
+                    "who built", "who made", "who created", "who developed",
+                    "who designed", "built this", "made this", "your team",
+                    "your creator", "about you", "who are you", "team member",
+                    "team lead", "main developer", "main in", "neuroforge",
+                    "sunny pathak", "saurav sharma", "himanshi sharma",
+                    "behind this", "developed by", "created by", "made by",
+                    "built by", "building you", "build you", "your developer",
+                    "your builder", "who is behind", "who works on",
+                ]
+                is_about = any(kw in q_lower for kw in about_keywords)
+
+                if is_about:
+                    team_text = (
+                        "This app was built by **Team NeuroForge**.\n\n"
+                        "| Role | Name |\n"
+                        "|:-----|:-----|\n"
+                        "| **Team Leader & Architect** | Sunny Pathak |\n"
+                        "| **Member** | Saurav Sharma |\n"
+                        "| **Member** | Himanshi Sharma |\n\n"
+                        "**Sunny Pathak** leads the team and is the primary architect behind "
+                        "OneTruth — from the semantic view design and RBAC model to the "
+                        "Cortex Analyst integration and this Streamlit app.\n\n"
+                        "OneTruth demonstrates governed supply chain analytics "
+                        "powered by Snowflake Semantic Views and Cortex Analyst."
+                    )
+                    with st.chat_message("assistant"):
+                        st.markdown(team_text)
+                    st.session_state.chat_history.append({
+                        "role": "analyst",
+                        "display": team_text,
+                        "content": [{"type": "text", "text": team_text}],
+                        "sql": None,
+                        "df": None,
                     })
                 else:
-                    analyst_messages.append({
-                        "role": "analyst",
-                        "content": turn["content"],
-                    })
+                    analyst_messages = []
+                    for turn in st.session_state.chat_history:
+                        if turn["role"] == "user":
+                            analyst_messages.append({
+                                "role": "user",
+                                "content": turn["content"],
+                            })
+                        else:
+                            analyst_messages.append({
+                                "role": "analyst",
+                                "content": turn["content"],
+                            })
 
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        resp = call_analyst(conn, analyst_messages)
-                        text, sql_stmt, suggestions = parse_analyst_response(resp)
-                    except Exception as e:
-                        text, sql_stmt, suggestions = f"Analyst call failed: {e}", None, []
+                    with st.chat_message("assistant"):
+                        with st.spinner("Thinking..."):
+                            try:
+                                resp = call_analyst(conn, analyst_messages)
+                                text, sql_stmt, suggestions = parse_analyst_response(resp)
+                            except Exception as e:
+                                text, sql_stmt, suggestions = f"Analyst call failed: {e}", None, []
 
-                result_df = None
+                        result_df = None
 
-                if text:
-                    is_refusal = any(
-                        kw in text.lower()
-                        for kw in ["not defined", "not allowed", "cannot", "can't answer"]
-                    )
-                    if is_refusal:
-                        st.warning(text)
-                    elif not sql_stmt:
-                        st.info(text)
+                        if text:
+                            is_refusal = any(
+                                kw in text.lower()
+                                for kw in ["not defined", "not allowed", "cannot", "can't answer"]
+                            )
+                            if is_refusal:
+                                st.warning(text)
+                            elif not sql_stmt:
+                                st.info(text)
 
-                if sql_stmt:
-                    try:
-                        result_df = run_query(conn, sql_stmt)
-                        auto_visualize(result_df, st)
-                    except Exception as e:
-                        st.warning(f"Could not execute SQL: {e}")
+                        if sql_stmt:
+                            try:
+                                result_df = run_query(conn, sql_stmt)
+                                auto_visualize(result_df, st)
+                            except Exception as e:
+                                st.warning(f"Could not execute SQL: {e}")
 
-                    with st.expander("Evidence"):
-                        st.code(sql_stmt, language="sql")
-                        matched = find_metric_in_sql(sql_stmt, metrics_meta)
-                        if matched:
-                            for name, meta in matched:
-                                st.markdown(f"**{name}**: {meta['comment']}")
-                        st.caption(f"Period: {extract_period(sql_stmt)}")
+                            with st.expander("Evidence"):
+                                st.code(sql_stmt, language="sql")
+                                matched = find_metric_in_sql(sql_stmt, metrics_meta)
+                                if matched:
+                                    for name, meta in matched:
+                                        st.markdown(f"**{name}**: {meta['comment']}")
+                                st.caption(f"Period: {extract_period(sql_stmt)}")
 
-                if suggestions:
-                    st.info("Suggested follow-ups:")
-                    for s in suggestions:
-                        st.write(f"- {s}")
+                        if suggestions:
+                            st.info("Suggested follow-ups:")
+                            for s in suggestions:
+                                st.write(f"- {s}")
 
-                response_content = []
-                if text:
-                    response_content.append({"type": "text", "text": text})
-                if sql_stmt:
-                    response_content.append({"type": "sql", "statement": sql_stmt})
-                if suggestions:
-                    response_content.append({"type": "suggestion", "suggestions": suggestions})
+                        response_content = []
+                        if text:
+                            response_content.append({"type": "text", "text": text})
+                        if sql_stmt:
+                            response_content.append({"type": "sql", "statement": sql_stmt})
+                        if suggestions:
+                            response_content.append({"type": "suggestion", "suggestions": suggestions})
 
-                st.session_state.chat_history.append({
-                    "role": "analyst",
-                    "display": text or "",
-                    "content": response_content,
-                    "sql": sql_stmt,
-                    "df": result_df,
-                })
+                        st.session_state.chat_history.append({
+                            "role": "analyst",
+                            "display": text or "",
+                            "content": response_content,
+                            "sql": sql_stmt,
+                            "df": result_df,
+                        })
 
-        # Auto-save after every exchange
-        user_name = st.session_state.get("user_name", "")
-        if user_name:
-            save_session(
-                conn,
-                st.session_state.active_session_id,
-                user_name,
-                st.session_state.session_title,
-                st.session_state.chat_history,
-            )
+                # Auto-save after every exchange
+                save_session(
+                    conn,
+                    st.session_state.active_session_id,
+                    ask_user,
+                    st.session_state.session_title,
+                    st.session_state.chat_history,
+                )
 
 # ── Tab 3: Before OneTruth ───────────────────────────────────────────────
 with tab_before:
