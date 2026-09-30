@@ -525,16 +525,16 @@ st.markdown(f"""
     div[data-testid="stChatInput"] {{
         border: 2px solid {BORDER} !important;
         border-radius: 28px !important;
-        background: {BG_CARD} !important;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important;
+        background: {NAVY} !important;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.12) !important;
         transition: border-color 0.2s;
     }}
     div[data-testid="stChatInput"]:focus-within {{
         border-color: {BRAND} !important;
-        box-shadow: 0 2px 16px rgba(14,165,233,0.15) !important;
+        box-shadow: 0 2px 16px rgba(14,165,233,0.25) !important;
     }}
     div[data-testid="stChatInput"] textarea {{
-        color: {NAVY} !important;
+        color: #FFFFFF !important;
         caret-color: {BRAND} !important;
     }}
     div[data-testid="stChatInput"] textarea::placeholder {{
