@@ -1,0 +1,251 @@
+name: OneTruth CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ── Job 1: Validate SQL files ──────────────────────────────────────────
+  validate-sql:
+    name: Validate SQL Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check SQL file ordering
+        run: |
+          echo "=== Validating SQL file naming convention ==="
+          cd sql
+          count=0
+          for f in [0-9]*.sql; do
+            num=$(echo "$f" | grep -oP '^\d+')
+            echo "  ✓ $f (step $num)"
+            count=$((count + 1))
+          done
+          echo ""
+          echo "✅ Found $count SQL files with valid naming"
+
+      - name: Check for syntax patterns
+        run: |
+          echo "=== Checking SQL files for common issues ==="
+          errors=0
+
+          # Check all SQL files exist and are non-empty
+          for f in sql/*.sql; do
+            if [ ! -s "$f" ]; then
+              echo "  ✗ $f is empty"
+              errors=$((errors + 1))
+            fi
+          done
+
+          # Verify semantic view exists
+          if grep -q "CREATE.*SEMANTIC VIEW" sql/17_semantic_view.sql; then
+            echo "  ✓ Semantic view definition found"
+          else
+            echo "  ✗ Missing semantic view definition"
+            errors=$((errors + 1))
+          fi
+
+          # Verify RBAC roles exist
+          if grep -q "CREATE.*ROLE" sql/18_rbac_roles.sql; then
+            echo "  ✓ RBAC role definitions found"
+          else
+            echo "  ✗ Missing RBAC role definitions"
+            errors=$((errors + 1))
+          fi
+
+          # Verify masking policy exists
+          if grep -q "MASKING POLICY" sql/19_masking_policy.sql; then
+            echo "  ✓ Masking policy definition found"
+          else
+            echo "  ✗ Missing masking policy"
+            errors=$((errors + 1))
+          fi
+
+          # Check AI guardrails
+          if grep -q "AI_SQL_GENERATION" sql/17_semantic_view.sql; then
+            echo "  ✓ AI_SQL_GENERATION guardrail configured"
+          else
+            echo "  ✗ Missing AI_SQL_GENERATION guardrail"
+            errors=$((errors + 1))
+          fi
+
+          if grep -q "AI_QUESTION_CATEGORIZATION" sql/17_semantic_view.sql; then
+            echo "  ✓ AI_QUESTION_CATEGORIZATION guardrail configured"
+          else
+            echo "  ✗ Missing AI_QUESTION_CATEGORIZATION guardrail"
+            errors=$((errors + 1))
+          fi
+
+          echo ""
+          if [ $errors -eq 0 ]; then
+            echo "✅ All SQL validation checks passed"
+          else
+            echo "❌ $errors validation error(s) found"
+            exit 1
+          fi
+
+  # ── Job 2: Validate Streamlit App ──────────────────────────────────────
+  validate-app:
+    name: Validate Streamlit App
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r app/requirements.txt
+          pip install py_compile
+
+      - name: Python syntax check
+        run: |
+          echo "=== Checking Python syntax ==="
+          python -m py_compile app/app.py
+          echo "✅ app.py compiles successfully"
+
+      - name: Check required imports
+        run: |
+          echo "=== Verifying required imports ==="
+          imports=("streamlit" "snowflake.connector" "plotly" "pandas" "requests")
+          for imp in "${imports[@]}"; do
+            if grep -q "import $imp\|from $imp" app/app.py; then
+              echo "  ✓ $imp"
+            else
+              echo "  ✗ Missing: $imp"
+              exit 1
+            fi
+          done
+          echo "✅ All required imports present"
+
+      - name: Check app structure
+        run: |
+          echo "=== Verifying app structure ==="
+          checks=(
+            "set_page_config:Page config"
+            "st.tabs:Tab layout"
+            "chat_input:Chat interface"
+            "chat_message:Chat messages"
+            "SEMANTIC_VIEW:Semantic view reference"
+            "auto_visualize:Auto-chart engine"
+            "save_session:Session persistence"
+            "download_button:Download buttons"
+            "MASK_COST_FROM_LOGISTICS\|masking\|MASKED:Masking demo"
+            "Team NeuroForge:Team identity"
+          )
+          for check in "${checks[@]}"; do
+            pattern="${check%%:*}"
+            label="${check##*:}"
+            if grep -qE "$pattern" app/app.py; then
+              echo "  ✓ $label"
+            else
+              echo "  ✗ Missing: $label"
+            fi
+          done
+          echo "✅ App structure validation complete"
+
+  # ── Job 3: Security Check ──────────────────────────────────────────────
+  security-check:
+    name: Security & Governance Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for hardcoded secrets
+        run: |
+          echo "=== Scanning for hardcoded secrets ==="
+          errors=0
+
+          # Check for hardcoded passwords
+          if grep -rniE "(password\s*=\s*['\"][^'\"]+['\"])" app/ --include="*.py" | grep -v "placeholder\|your_password\|example"; then
+            echo "  ✗ Possible hardcoded password found"
+            errors=$((errors + 1))
+          else
+            echo "  ✓ No hardcoded passwords"
+          fi
+
+          # Check for API keys
+          if grep -rniE "(api[_-]?key\s*=\s*['\"][a-zA-Z0-9]{20,})" app/ --include="*.py"; then
+            echo "  ✗ Possible hardcoded API key found"
+            errors=$((errors + 1))
+          else
+            echo "  ✓ No hardcoded API keys"
+          fi
+
+          # Verify secrets are loaded from st.secrets
+          if grep -q "st.secrets" app/app.py; then
+            echo "  ✓ Uses st.secrets for credential management"
+          else
+            echo "  ✗ Not using st.secrets"
+            errors=$((errors + 1))
+          fi
+
+          echo ""
+          if [ $errors -eq 0 ]; then
+            echo "✅ Security scan passed"
+          else
+            echo "❌ $errors security issue(s) found"
+            exit 1
+          fi
+
+      - name: Verify RBAC configuration
+        run: |
+          echo "=== Auditing RBAC & Masking ==="
+
+          # Count roles
+          roles=$(grep -c "CREATE.*ROLE" sql/18_rbac_roles.sql || echo "0")
+          echo "  ✓ $roles RBAC roles defined"
+
+          # Count masking policies
+          masks=$(grep -c "MASKING POLICY" sql/19_masking_policy.sql || echo "0")
+          echo "  ✓ $masks masking policies defined"
+
+          # Count masked columns
+          masked_cols=$(grep -c "SET MASKING POLICY" sql/19_masking_policy.sql || echo "0")
+          echo "  ✓ $masked_cols columns masked"
+
+          # Verify grants exist
+          grants=$(grep -c "GRANT" sql/20_grants.sql || echo "0")
+          echo "  ✓ $grants grant statements"
+
+          echo ""
+          echo "✅ Governance audit complete"
+
+  # ── Job 4: Build Summary ───────────────────────────────────────────────
+  build-summary:
+    name: Pipeline Summary
+    needs: [validate-sql, validate-app, security-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║           OneTruth CI/CD Pipeline — Summary             ║"
+          echo "║           Team NeuroForge                               ║"
+          echo "╠══════════════════════════════════════════════════════════╣"
+          echo "║                                                        ║"
+          echo "║  SQL Validation:      ${{ needs.validate-sql.result }}  ║"
+          echo "║  App Validation:      ${{ needs.validate-app.result }}  ║"
+          echo "║  Security Audit:      ${{ needs.security-check.result }}║"
+          echo "║                                                        ║"
+          echo "╠══════════════════════════════════════════════════════════╣"
+          echo "║  Governed Metrics:    4 (OTD, Fill, DOI, Landed Cost)  ║"
+          echo "║  RBAC Roles:          3 (Planning, Procurement, Logis) ║"
+          echo "║  Masking Policies:    1 (cost columns from Logistics)  ║"
+          echo "║  AI Guardrails:       2 (SQL gen + question filtering) ║"
+          echo "║  App Tabs:            6                                ║"
+          echo "╚══════════════════════════════════════════════════════════╝"

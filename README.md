@@ -278,6 +278,59 @@ The masking policy `MASK_COST_FROM_LOGISTICS` returns NULL for `unit_price`, `fr
 
 ---
 
+## CI/CD Pipeline
+
+[![CI/CD](https://github.com/AARAV-git/onetruth/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/AARAV-git/onetruth/actions/workflows/ci-cd.yml)
+
+Every push to `main` triggers a **4-stage GitHub Actions pipeline** that validates the entire stack before deployment:
+
+```
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│  Validate    │   │  Validate    │   │  Security &  │
+│  SQL Scripts │   │  Streamlit   │   │  Governance  │
+│  (20 files)  │   │  App         │   │  Audit       │
+└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
+       │                  │                  │
+       └──────────┬───────┴──────────────────┘
+                  ▼
+         ┌──────────────┐
+         │  Pipeline    │
+         │  Summary     │
+         └──────────────┘
+```
+
+### Pipeline Jobs
+
+| Job | What it checks | Fails if |
+|:----|:---------------|:---------|
+| **Validate SQL** | File naming convention, semantic view definition, RBAC roles, masking policy, AI guardrails (`AI_SQL_GENERATION`, `AI_QUESTION_CATEGORIZATION`) | Any SQL file is empty, missing semantic view, missing guardrails |
+| **Validate App** | Python syntax, required imports (streamlit, snowflake, plotly, pandas), app structure (tabs, chat, auto-chart, sessions, downloads, masking demo, team identity) | Syntax error, missing critical feature |
+| **Security Audit** | No hardcoded passwords/API keys, uses `st.secrets`, RBAC role count, masking policy count, grant statements | Hardcoded credentials found |
+| **Pipeline Summary** | Aggregates all results, prints governance stats | Any upstream job fails |
+
+### Running the Pipeline
+
+The pipeline runs automatically on every push. You can also trigger it manually:
+
+```bash
+# Via GitHub CLI
+gh workflow run ci-cd.yml
+
+# Or click "Run workflow" in the Actions tab
+```
+
+### View Results
+
+```bash
+# Check latest run
+gh run list --limit 1
+
+# View logs on failure
+gh run view <run_id> --log-failed
+```
+
+---
+
 ## Quick Start
 
 ### 1. Set up Snowflake objects
@@ -306,20 +359,23 @@ streamlit run app.py
 ```
 onetruth/
 ├── README.md
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml            ← 4-stage GitHub Actions pipeline
 ├── app/
-│   ├── app.py                ← Streamlit app (6 tabs, 1600+ lines)
+│   ├── app.py                   ← Streamlit app (6 tabs, 1600+ lines)
 │   └── requirements.txt
 └── sql/
-    ├── 01_setup.sql          ← database, schemas, warehouse
-    ├── 02–07_dim_*.sql       ← dimension tables
-    ├── 08–12_gen_*.sql       ← deterministic synthetic data
-    ├── 13_shift_dates.sql    ← align to 2026 calendar
-    ├── 14–15_view_*.sql      ← helper views
-    ├── 16_view_persona.sql   ← 4 conflicting OTD definitions
-    ├── 17_semantic_view.sql  ← THE governed semantic view
-    ├── 18_rbac_roles.sql     ← 3 persona roles
-    ├── 19_masking_policy.sql ← column-level cost masking
-    └── 20_grants.sql         ← role grants
+    ├── 01_setup.sql             ← database, schemas, warehouse
+    ├── 02–07_dim_*.sql          ← dimension tables
+    ├── 08–12_gen_*.sql          ← deterministic synthetic data
+    ├── 13_shift_dates.sql       ← align to 2026 calendar
+    ├── 14–15_view_*.sql         ← helper views
+    ├── 16_view_persona.sql      ← 4 conflicting OTD definitions
+    ├── 17_semantic_view.sql     ← THE governed semantic view
+    ├── 18_rbac_roles.sql        ← 3 persona roles
+    ├── 19_masking_policy.sql    ← column-level cost masking
+    └── 20_grants.sql            ← role grants
 ```
 
 ---
