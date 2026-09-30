@@ -400,11 +400,18 @@ st.markdown(f"""
     .stApp h1, .stApp h2, .stApp h3, .stApp h4 {{
         color: {NAVY} !important;
     }}
-    .stApp p, .stApp span, .stApp li, .stApp label, .stApp div {{
+    .stApp p, .stApp li, .stApp label {{
         color: {SLATE};
     }}
     .stApp .stMarkdown p {{
         color: {SLATE};
+    }}
+    /* Chat messages inherit from bubble, not global */
+    div[data-testid="stChatMessage"] p,
+    div[data-testid="stChatMessage"] span,
+    div[data-testid="stChatMessage"] li,
+    div[data-testid="stChatMessage"] div {{
+        color: inherit !important;
     }}
 
     /* ---- Sidebar ---- */
@@ -494,6 +501,9 @@ st.markdown(f"""
         background: transparent !important;
     }}
     /* User bubble */
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {{
+        color: white !important;
+    }}
     div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] {{
         background: linear-gradient(135deg, {BRAND} 0%, {BRAND_DARK} 100%);
         color: white !important;
@@ -502,14 +512,17 @@ st.markdown(f"""
         display: inline-block;
         box-shadow: 0 3px 12px rgba(14,165,233,0.3);
     }}
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] p,
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] span,
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] li,
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div[data-testid="stMarkdownContainer"] strong,
-    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) * {{
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) p,
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) span,
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) li,
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) strong,
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) div {{
         color: white !important;
     }}
     /* Assistant bubble */
+    div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {{
+        color: {SLATE} !important;
+    }}
     div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) div[data-testid="stMarkdownContainer"] {{
         background: {BG_CARD};
         border: 1.5px solid {BORDER};
