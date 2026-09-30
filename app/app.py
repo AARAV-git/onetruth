@@ -565,79 +565,105 @@ with tab_ask:
         with st.chat_message("user"):
             st.markdown(question)
 
-        # Build multi-turn message list for Cortex Analyst
-        analyst_messages = []
-        for turn in st.session_state.chat_history:
-            if turn["role"] == "user":
-                analyst_messages.append({
-                    "role": "user",
-                    "content": turn["content"],
-                })
-            else:
-                analyst_messages.append({
-                    "role": "analyst",
-                    "content": turn["content"],
-                })
+        # Local answers for non-data questions
+        q_lower = question.lower()
+        about_keywords = ["who built", "who made", "who created", "who developed",
+                          "who designed", "built this", "made this", "your team",
+                          "your creator", "about you", "who are you"]
+        is_about = any(kw in q_lower for kw in about_keywords)
 
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    resp = call_analyst(conn, analyst_messages)
-                    text, sql_stmt, suggestions = parse_analyst_response(resp)
-                except Exception as e:
-                    text, sql_stmt, suggestions = f"Analyst call failed: {e}", None, []
-
-            result_df = None
-            display_parts = []
-
-            if text:
-                is_refusal = any(
-                    kw in text.lower()
-                    for kw in ["not defined", "not allowed", "cannot", "can't answer"]
-                )
-                if is_refusal:
-                    st.warning(text)
-                    display_parts.append(text)
-                elif not sql_stmt:
-                    st.info(text)
-                    display_parts.append(text)
-
-            if sql_stmt:
-                try:
-                    result_df = run_query(conn, sql_stmt)
-                    auto_visualize(result_df, st)
-                except Exception as e:
-                    st.warning(f"Could not execute SQL: {e}")
-
-                with st.expander("Evidence"):
-                    st.code(sql_stmt, language="sql")
-                    matched = find_metric_in_sql(sql_stmt, metrics_meta)
-                    if matched:
-                        for name, meta in matched:
-                            st.markdown(f"**{name}**: {meta['comment']}")
-                    st.caption(f"Period: {extract_period(sql_stmt)}")
-
-            if suggestions:
-                st.info("Suggested follow-ups:")
-                for s in suggestions:
-                    st.write(f"- {s}")
-
-            # Build the response content for Analyst multi-turn
-            response_content = []
-            if text:
-                response_content.append({"type": "text", "text": text})
-            if sql_stmt:
-                response_content.append({"type": "sql", "statement": sql_stmt})
-            if suggestions:
-                response_content.append({"type": "suggestion", "suggestions": suggestions})
-
+        if is_about:
+            team_text = (
+                "This app was built by **Team NeuroForge**.\n\n"
+                "- **Team Leader:** Sunny Pathak\n"
+                "- **Member:** Saurav Sharma\n"
+                "- **Member:** Himanshi Sharma\n\n"
+                "OneTruth demonstrates governed supply chain analytics "
+                "powered by Snowflake Semantic Views and Cortex Analyst."
+            )
+            with st.chat_message("assistant"):
+                st.markdown(team_text)
             st.session_state.chat_history.append({
                 "role": "analyst",
-                "display": text or "",
-                "content": response_content,
-                "sql": sql_stmt,
-                "df": result_df,
+                "display": team_text,
+                "content": [{"type": "text", "text": team_text}],
+                "sql": None,
+                "df": None,
             })
+        else:
+            # Build multi-turn message list for Cortex Analyst
+            analyst_messages = []
+            for turn in st.session_state.chat_history:
+                if turn["role"] == "user":
+                    analyst_messages.append({
+                        "role": "user",
+                        "content": turn["content"],
+                    })
+                else:
+                    analyst_messages.append({
+                        "role": "analyst",
+                        "content": turn["content"],
+                    })
+
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        resp = call_analyst(conn, analyst_messages)
+                        text, sql_stmt, suggestions = parse_analyst_response(resp)
+                    except Exception as e:
+                        text, sql_stmt, suggestions = f"Analyst call failed: {e}", None, []
+
+                result_df = None
+                display_parts = []
+
+                if text:
+                    is_refusal = any(
+                        kw in text.lower()
+                        for kw in ["not defined", "not allowed", "cannot", "can't answer"]
+                    )
+                    if is_refusal:
+                        st.warning(text)
+                        display_parts.append(text)
+                    elif not sql_stmt:
+                        st.info(text)
+                        display_parts.append(text)
+
+                if sql_stmt:
+                    try:
+                        result_df = run_query(conn, sql_stmt)
+                        auto_visualize(result_df, st)
+                    except Exception as e:
+                        st.warning(f"Could not execute SQL: {e}")
+
+                    with st.expander("Evidence"):
+                        st.code(sql_stmt, language="sql")
+                        matched = find_metric_in_sql(sql_stmt, metrics_meta)
+                        if matched:
+                            for name, meta in matched:
+                                st.markdown(f"**{name}**: {meta['comment']}")
+                        st.caption(f"Period: {extract_period(sql_stmt)}")
+
+                if suggestions:
+                    st.info("Suggested follow-ups:")
+                    for s in suggestions:
+                        st.write(f"- {s}")
+
+                # Build the response content for Analyst multi-turn
+                response_content = []
+                if text:
+                    response_content.append({"type": "text", "text": text})
+                if sql_stmt:
+                    response_content.append({"type": "sql", "statement": sql_stmt})
+                if suggestions:
+                    response_content.append({"type": "suggestion", "suggestions": suggestions})
+
+                st.session_state.chat_history.append({
+                    "role": "analyst",
+                    "display": text or "",
+                    "content": response_content,
+                    "sql": sql_stmt,
+                    "df": result_df,
+                })
 
 # ── Tab 3: Before OneTruth ───────────────────────────────────────────────
 with tab_before:
